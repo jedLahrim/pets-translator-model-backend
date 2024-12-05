@@ -8,7 +8,7 @@ import onnx
 import onnxruntime as ort
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-#
+
 app = FastAPI()
 
 # Add CORS middleware
