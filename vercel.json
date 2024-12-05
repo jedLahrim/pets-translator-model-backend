@@ -12,6 +12,12 @@
       "dest": "main.py"
     }
   ],
+   "functions": {
+     "*.py": {
+       "maxDuration": 10,
+       "memory": 1024
+     }
+   },
   "env": {
     "PYTHON_VERSION": "3.9"
   }
