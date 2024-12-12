@@ -8,6 +8,7 @@ import onnx
 import onnxruntime as ort
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+
 #
 app = FastAPI()
 
@@ -21,11 +22,11 @@ app.add_middleware(
 )
 
 # Load the ONNX model
-onnx_model = onnx.load("pet_translator_model.onnx")
-ort_session = ort.InferenceSession("pet_translator_model.onnx")
+onnx_model = onnx.load("cat_translator_model.onnx")
+ort_session = ort.InferenceSession("cat_translator_model.onnx")
 
 # Load the saved label encoder
-with open("label_encoder.pkl", "rb") as f:
+with open("cat_label_encoder.pkl", "rb") as f:
     label_encoder = pickle.load(f)
 
 
