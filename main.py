@@ -97,7 +97,7 @@ async def translate(pet_type: PetType, language_code: str, audio_file: UploadFil
     if not language_code:
         raise HTTPException(400, detail="language_code is required")
 
-    if audio_file.filename:
+    if not audio_file:
         raise HTTPException(404, detail="no file uploaded")
     try:
         # Create a temporary file to save the uploaded audio
