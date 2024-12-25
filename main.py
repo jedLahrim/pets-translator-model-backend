@@ -75,6 +75,10 @@ async def welcome():
 
 @app.post("/translate")
 async def translate(pet_type: PetType, audio_file: UploadFile = File(...)):
+    file_size = audio_file.size
+
+    if file_size > 9 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File size exceeds 8 MB limit.")
     if not pet_type:
         raise HTTPException(400, detail="PetType is required CAT OR DOG")
     if audio_file.filename:
@@ -111,7 +115,7 @@ async def translate(pet_type: PetType, audio_file: UploadFile = File(...)):
         # Get the predicted label
         pred_label = label_encoder.inverse_transform([np.argmax(prediction)])
         text = pred_label[0]
-        label = LABEL.get(text, f'{pet_type} LABEL' if text not in LABEL else "unknown")
+        label = LABEL.get(text, f'{pet_type.name} LABEL' if text not in LABEL else "unknown")
         return {"text": text, "label": label}
 
     except Exception as e:
