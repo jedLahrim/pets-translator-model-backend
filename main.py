@@ -9,6 +9,7 @@ import onnx
 import onnxruntime as ort
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from translate import Translator
 
 from label.labels import DOG_LABEL_TYPE, CAT_LABEL_TYPE
 from pet_type import PetType
@@ -73,16 +74,31 @@ async def welcome():
     return {"message": "hello from the server"}
 
 
+def translate_text(texts: list, language_code: str):
+    translator = Translator(to_lang=language_code)
+    try:
+        results = [translator.translate(text) for text in texts]
+        return results
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
+
+
 @app.post("/translate")
-async def translate(pet_type: PetType, audio_file: UploadFile = File(...)):
+async def translate(pet_type: PetType, language_code: str, audio_file: UploadFile = File(...)):
     file_size = audio_file.size
 
     if file_size > 9 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File size exceeds 8 MB limit.")
+
     if not pet_type:
         raise HTTPException(400, detail="PetType is required CAT OR DOG")
+
+    if not language_code:
+        raise HTTPException(400, detail="language_code is required")
+
     if audio_file.filename:
-        print(f"Error no file uploaded {audio_file.filename}")
+        raise HTTPException(404, detail="no file uploaded")
     try:
         # Create a temporary file to save the uploaded audio
         with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(audio_file.filename)[1]) as temp_file:
@@ -116,7 +132,8 @@ async def translate(pet_type: PetType, audio_file: UploadFile = File(...)):
         pred_label = label_encoder.inverse_transform([np.argmax(prediction)])
         text = pred_label[0]
         label = LABEL.get(text, f'{pet_type.name} LABEL' if text not in LABEL else "unknown")
-        return {"text": text, "label": label}
+        [translated_text, translated_label] = translate_text([text, label], "zh")
+        return {"text": translated_text, "label": translated_label}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error during prediction: {str(e)}")
