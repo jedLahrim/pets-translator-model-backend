@@ -1,6 +1,7 @@
 import os
 import pickle
 import tempfile
+from typing import Dict
 
 import librosa
 import numpy as np
@@ -9,6 +10,7 @@ import onnxruntime as ort
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+from label.labels import DOG_LABEL_TYPE, CAT_LABEL_TYPE
 from pet_type import PetType
 
 #
@@ -27,7 +29,9 @@ app.add_middleware(
 def load_models(pet_type: PetType):
     ort_session = {}
     label_encoder = {}
+    LABEL: Dict[str, str] = {}
     if pet_type == PetType.CAT:
+        LABEL = CAT_LABEL_TYPE
         # Load the ONNX model
         onnx_cat_model = onnx.load("models/cat_translator_model.onnx")
         ort_cat_session = ort.InferenceSession("models/cat_translator_model.onnx")
@@ -39,6 +43,7 @@ def load_models(pet_type: PetType):
 
 
     elif pet_type == PetType.DOG:
+        LABEL = DOG_LABEL_TYPE
         # Load the ONNX model
         onnx_dog_model = onnx.load("models/dog_translator_model.onnx")
         ort_dog_session = ort.InferenceSession("models/dog_translator_model.onnx")
@@ -49,7 +54,7 @@ def load_models(pet_type: PetType):
             ort_session = ort_dog_session
             label_encoder = dog_label_encoder
 
-    return ort_session, label_encoder
+    return ort_session, label_encoder, LABEL
 
 
 def extract_features(file_path, n_mfcc=40, max_length=200):
@@ -95,7 +100,7 @@ async def translate(pet_type: PetType, audio_file: UploadFile = File(...)):
 
         # Convert to float32
         feature = feature.astype(np.float32)
-        ort_session, label_encoder = load_models(pet_type)
+        ort_session, label_encoder, LABEL = load_models(pet_type)
         # Get input and output names
         input_name = ort_session.get_inputs()[0].name
         output_name = ort_session.get_outputs()[0].name
@@ -105,7 +110,9 @@ async def translate(pet_type: PetType, audio_file: UploadFile = File(...)):
 
         # Get the predicted label
         pred_label = label_encoder.inverse_transform([np.argmax(prediction)])
-        return {"label": pred_label[0]}
+        text = pred_label[0]
+        label = LABEL.get(text, f'{pet_type} LABEL' if text not in LABEL else "unknown")
+        return {"text": text, "label": label}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error during prediction: {str(e)}")
