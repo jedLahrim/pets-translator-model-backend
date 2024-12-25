@@ -131,8 +131,10 @@ async def translate(pet_type: PetType, language_code: str, audio_file: UploadFil
         # Get the predicted label
         pred_label = label_encoder.inverse_transform([np.argmax(prediction)])
         text = pred_label[0]
-        default_label = f'{pet_type.name} Label'
-        label = LABEL.get(text, default_label.capitalize() if text not in LABEL else "unknown")
+        default_label = f'{pet_type.name} label'.capitalize()
+        label = LABEL.get(text, default_label)
+        if not label:
+            label = default_label
         [translated_text, translated_label] = translate_text([text, label], language_code)
         return {"text": translated_text, "label": translated_label}
 
