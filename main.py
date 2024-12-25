@@ -95,16 +95,16 @@ async def translate(pet_type: PetType, audio_file: UploadFile = File(...)):
 
         # Convert to float32
         feature = feature.astype(np.float32)
-        ort_cat_session, cat_label_encoder = load_models(pet_type)
+        ort_session, label_encoder = load_models(pet_type)
         # Get input and output names
-        input_name = ort_cat_session.get_inputs()[0].name
-        output_name = ort_cat_session.get_outputs()[0].name
+        input_name = ort_session.get_inputs()[0].name
+        output_name = ort_session.get_outputs()[0].name
 
         # Run inference
-        prediction = ort_cat_session.run([output_name], {input_name: feature})[0]
+        prediction = ort_session.run([output_name], {input_name: feature})[0]
 
         # Get the predicted label
-        pred_label = cat_label_encoder.inverse_transform([np.argmax(prediction)])
+        pred_label = label_encoder.inverse_transform([np.argmax(prediction)])
         return {"label": pred_label[0]}
 
     except Exception as e:
