@@ -9,6 +9,8 @@ import onnxruntime as ort
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+from pet_type import PetType
+
 #
 app = FastAPI()
 
@@ -21,13 +23,33 @@ app.add_middleware(
     allow_headers=["*"],  # Allows all headers
 )
 
-# Load the ONNX model
-onnx_model = onnx.load("cat_translator_model.onnx")
-ort_session = ort.InferenceSession("cat_translator_model.onnx")
 
-# Load the saved label encoder
-with open("cat_label_encoder.pkl", "rb") as f:
-    label_encoder = pickle.load(f)
+def load_models(pet_type: PetType):
+    ort_session = {}
+    label_encoder = {}
+    if pet_type == PetType.CAT:
+        # Load the ONNX model
+        onnx_cat_model = onnx.load("models/cat_translator_model.onnx")
+        ort_cat_session = ort.InferenceSession("models/cat_translator_model.onnx")
+        # Load the saved label encoder
+        with open("models/cat_label_encoder.pkl", "rb") as f:
+            cat_label_encoder = pickle.load(f)
+            ort_session = ort_cat_session
+            label_encoder = cat_label_encoder
+
+
+    elif pet_type == PetType.DOG:
+        # Load the ONNX model
+        onnx_dog_model = onnx.load("models/dog_translator_model.onnx")
+        ort_dog_session = ort.InferenceSession("models/dog_translator_model.onnx")
+
+        # Load the saved label encoder
+        with open("models/dog_label_encoder.pkl", "rb") as f:
+            dog_label_encoder = pickle.load(f)
+            ort_session = ort_dog_session
+            label_encoder = dog_label_encoder
+
+    return ort_session, label_encoder
 
 
 def extract_features(file_path, n_mfcc=40, max_length=200):
@@ -46,12 +68,16 @@ async def welcome():
     return {"message": "hello from the server"}
 
 
-@app.post("/predict")
-async def predict(file: UploadFile = File(...)):
+@app.post("/translate")
+async def translate(pet_type: PetType, audio_file: UploadFile = File(...)):
+    if not pet_type:
+        raise HTTPException(400, detail="PetType is required CAT OR DOG")
+    if audio_file.filename:
+        print(f"Error no file uploaded {audio_file.filename}")
     try:
         # Create a temporary file to save the uploaded audio
-        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as temp_file:
-            contents = await file.read()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(audio_file.filename)[1]) as temp_file:
+            contents = await audio_file.read()
             temp_file.write(contents)
             file_path = temp_file.name
 
@@ -69,16 +95,16 @@ async def predict(file: UploadFile = File(...)):
 
         # Convert to float32
         feature = feature.astype(np.float32)
-
+        ort_cat_session, cat_label_encoder = load_models(pet_type)
         # Get input and output names
-        input_name = ort_session.get_inputs()[0].name
-        output_name = ort_session.get_outputs()[0].name
+        input_name = ort_cat_session.get_inputs()[0].name
+        output_name = ort_cat_session.get_outputs()[0].name
 
         # Run inference
-        prediction = ort_session.run([output_name], {input_name: feature})[0]
+        prediction = ort_cat_session.run([output_name], {input_name: feature})[0]
 
         # Get the predicted label
-        pred_label = label_encoder.inverse_transform([np.argmax(prediction)])
+        pred_label = cat_label_encoder.inverse_transform([np.argmax(prediction)])
         return {"label": pred_label[0]}
 
     except Exception as e:
