@@ -57,6 +57,10 @@ DOG_LABEL_TYPE = {
     "the dog is whining, indicating a desire for interaction or care.": "attention-seeking",
     "the dog is whining softly, expressing a need for companionship.": "lonely",
     "the puppy is whining cutely, seeking attention and affection from its owner.": "attention-seeking",
+    'A soft, plaintive whining sound from a dog, expressing feelings of discomfort or a desire for attention. This sound captures the essence of a dog\'s need for companionship or reassurance.': '',
+    'A high-pitched, heart-wrenching cry from a puppy, conveying innocence and vulnerability. This sound effect is perfect for evoking sympathy and highlighting the emotional needs of young dogs.': '',
+    'A gentle, sorrowful cry from a dog, suggesting a longing for affection and comfort. This sound captures the emotional bond between dogs and their owners, ideal for scenes requiring a heartfelt touch.': '',
+    'A series of whining sounds from a dog, indicating restlessness or a plea for attention. This sound effect effectively portrays a dog\'s emotional state and can be used to enhance narratives involving canine characters.': '',
     "the dog is whining softly, reflecting feelings of sadness or loneliness.": "sad",
     "the dog is whimpering playfully, adding a humorous touch to its expressions of sadness or need.": "playful",
     "the dog alternates between whining and howling, creating a comical and exaggerated display of emotion.": "vocal",
@@ -78,7 +82,7 @@ DOG_LABEL_TYPE = {
     "the dog howls melodiously, perhaps in response to sounds or to communicate with others.": "howling",
     "the dog alternates between barking and howling, expressing a mix of excitement and alertness.": "vocal",
     "the large dog is barking with a light snarl, indicating a mix of alertness and mild aggression": "warning",
-    "the dog is snarling menacingly, creating a chilling atmosphere that conveys strong aggression": "aggressive"
+    "the dog is snarling menacingly, creating a chilling atmosphere that conveys strong aggression": "aggressive",
 }
 
 CAT_LABEL_TYPE = {
