@@ -87,9 +87,9 @@ def translate_text(texts: list, language_code: str):
 @app.post("/translate")
 async def translate(pet_type: PetType, language_code: str, audio_file: UploadFile = File(...)):
     file_size = audio_file.size
-
-    if file_size > 5 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File size exceeds 5 MB limit.")
+    max_size = 10 * 1024 * 1024
+    if file_size > max_size:
+        raise HTTPException(status_code=400, detail="File size exceeds 10 MB limit.")
 
     if not pet_type:
         raise HTTPException(400, detail="PetType is required CAT OR DOG")
