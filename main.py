@@ -133,10 +133,10 @@ async def translate(pet_type: PetType, language_code: str, audio_file: UploadFil
         text = pred_label[0]
         default_label = f'{pet_type.name} label'.capitalize()
         label = LABEL.get(text, default_label)
-        if not label:
-            label = default_label
-        [translated_text, translated_label] = translate_text([text, label], language_code)
-        return {"text": translated_text, "label": translated_label}
+        # if not label:
+        #     label = default_label
+        # [translated_text, translated_label] = translate_text([text, label], language_code)
+        return {"text": text, "label": label}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error during prediction: {str(e)}")
