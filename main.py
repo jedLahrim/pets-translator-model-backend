@@ -1,6 +1,7 @@
 import os
 import pickle
 import tempfile
+import time
 from typing import Dict
 
 import librosa
@@ -70,6 +71,9 @@ def translate_text(texts: list, language_code: str):
 
 @app.route("/translate", methods=['POST'])
 def translate():
+    start_time = time.time()
+    print(f"\n=== Starting translation request at {time.strftime('%Y-%m-%d %H:%M:%S')} ===")
+
     if 'audio_file' not in request.files:
         return jsonify({"error": "no file uploaded"}), 404
 
@@ -77,19 +81,22 @@ def translate():
     pet_type = request.args.get('pet_type')
     language_code = request.args.get('language_code')
 
-    if not pet_type:
-        return jsonify({"error": "PetType is required CAT OR DOG"}), 400
+    print(f"Request params - Pet type: {pet_type}, Language: {language_code}")
+    print(f"File received - Name: {audio_file.filename}, Size: {len(audio_file.read()) / 1024:.2f}KB")
+    audio_file.seek(0)
 
-    if not language_code:
-        return jsonify({"error": "language_code is required"}), 400
+    if not pet_type or not language_code:
+        return jsonify({"error": "Missing required parameters"}), 400
 
     file_size = len(audio_file.read())
-    audio_file.seek(0)  # Reset file pointer after reading
+    audio_file.seek(0)
     max_size = 10 * 1024 * 1024
     if file_size > max_size:
         return jsonify({"error": "File size exceeds 10 MB limit."}), 400
 
     try:
+        # Feature extraction timing
+        feature_start = time.time()
         pet_type = PetType[pet_type.upper()]
         filename = secure_filename(audio_file.filename)
         with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1]) as temp_file:
@@ -98,30 +105,45 @@ def translate():
 
         feature = extract_features(file_path)
         os.unlink(file_path)
+        print(f"Feature extraction took: {time.time() - feature_start:.2f} seconds")
 
         if feature is None:
             return jsonify({"error": "Error processing the file"}), 400
 
+        # Model loading timing
+        model_start = time.time()
         feature = np.expand_dims(feature, axis=0)
         feature = feature[..., np.newaxis]
         feature = feature.astype(np.float32)
 
         ort_session, label_encoder, LABEL = load_models(pet_type)
+        print(f"Model loading took: {time.time() - model_start:.2f} seconds")
+
+        # Prediction timing
+        predict_start = time.time()
         input_name = ort_session.get_inputs()[0].name
         output_name = ort_session.get_outputs()[0].name
-
         prediction = ort_session.run([output_name], {input_name: feature})[0]
         pred_label = label_encoder.inverse_transform([np.argmax(prediction)])
+        print(f"Prediction took: {time.time() - predict_start:.2f} seconds")
+
+        # Translation timing
+        translation_start = time.time()
         text = pred_label[0]
         default_label = f'{pet_type.name} label'.capitalize()
         label = LABEL.get(text, default_label)
         if not label:
             label = default_label
         [translated_text, translated_label] = translate_text([text, label], language_code)
+        print(f"Translation took: {time.time() - translation_start:.2f} seconds")
+
+        total_time = time.time() - start_time
+        print(f"=== Total request processing time: {total_time:.2f} seconds ===\n")
 
         return jsonify({"text": translated_text, "label": translated_label})
 
     except Exception as e:
+        print(f"Error occurred: {str(e)}")
         return jsonify({"error": f"Error during prediction: {str(e)}"}), 500
 
 
