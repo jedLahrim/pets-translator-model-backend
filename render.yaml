@@ -1,7 +1,6 @@
 services:
   - type: web
     name: my-fastapi-app
-    plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: python maink.py
+    startCommand: uvicorn main:app
     runtime: python
