@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: my-fastapi-app
+    name: my-flask-app
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app
+    startCommand: gunicorn main:app
     runtime: python
