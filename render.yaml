@@ -2,5 +2,5 @@ services:
   - type: web
     name: my-flask-app
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn main:app
+    startCommand: gunicorn main:app --host 0.0.0.0 --port 5002
     runtime: python
