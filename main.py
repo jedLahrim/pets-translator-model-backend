@@ -11,7 +11,7 @@ import onnxruntime as ort
 from flask import Flask, request, jsonify
 from translate import Translator
 from werkzeug.utils import secure_filename
-
+from asgiref.wsgi import WsgiToAsgi
 from label.labels import DOG_LABEL_TYPE, CAT_LABEL_TYPE
 from pet_type import PetType
 
@@ -148,4 +148,5 @@ def translate():
 
 
 if __name__ == '__main__':
+    asgi_app = WsgiToAsgi(app)
     app.run(host='0.0.0.0', port=5002)
