@@ -148,5 +148,5 @@ def translate():
 
 
 if __name__ == '__main__':
+    app.run()
     asgi_app = WsgiToAsgi(app)
-    app.run(host='0.0.0.0', port=5002)
