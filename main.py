@@ -147,6 +147,6 @@ def translate():
         return jsonify({"error": f"Error during prediction: {str(e)}"}), 500
 
 
-# if __name__ == '__main__':
-#     app.run()
+if __name__ == '__main__':
+    app.run()
     # asgi_app = WsgiToAsgi(app)
