@@ -10,3 +10,4 @@ translate~=3.6.1
 Flask~=2.3.2
 werkzeug~=3.0.3
 asgiref
+setuptools>=67.0.0
