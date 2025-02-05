@@ -13,5 +13,6 @@ flask_cors
 werkzeug~=3.0.3
 asgiref
 setuptools>=58.0.0
+sentence_transformers
 wheel
 speechmatics-python
