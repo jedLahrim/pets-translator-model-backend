@@ -216,7 +216,7 @@ def transcribe_audio(filepath, language_code='en'):
 
 def find_closest_audio(input_text, pet_type: PetType):
     # Initialize models
-    text_encoder = SentenceTransformer("models/pet_text_encoder")
+    text_encoder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
     audio_files, text_embeddings = None, None  # Initialize variables
 
     if pet_type == PetType.DOG:
