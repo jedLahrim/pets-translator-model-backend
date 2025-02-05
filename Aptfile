@@ -1,1 +1,4 @@
 python3-distutils
+libsndfile1
+libsndfile1-dev
+ffmpeg
