@@ -9,7 +9,6 @@ import librosa
 import numpy as np
 import onnx
 import onnxruntime as ort
-import torch
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from scipy.spatial.distance import cosine
@@ -223,8 +222,7 @@ model = AutoModel.from_pretrained(MODEL_NAME)
 def encode_text(text):
     """Encodes text using a lightweight transformer model."""
     inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True)
-    with torch.no_grad():
-        outputs = model(**inputs)
+    outputs = model(**inputs)
     return outputs.last_hidden_state.mean(dim=1).squeeze().numpy()
 
 
