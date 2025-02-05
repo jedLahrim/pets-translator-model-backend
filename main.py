@@ -12,9 +12,9 @@ import onnxruntime as ort
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from scipy.spatial.distance import cosine
-from sentence_transformers import SentenceTransformer
 from speechmatics.batch_client import BatchClient
 from speechmatics.models import ConnectionSettings
+from transformers import AutoTokenizer, AutoModel
 from translate import Translator
 from werkzeug.utils import secure_filename
 
@@ -214,35 +214,44 @@ def transcribe_audio(filepath, language_code='en'):
         raise
 
 
+MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+model = AutoModel.from_pretrained(MODEL_NAME)
+
+
+def encode_text(text):
+    """Encodes text using a lightweight transformer model."""
+    inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True)
+    outputs = model(**inputs)
+    return outputs.last_hidden_state.mean(dim=1).squeeze().numpy()
+
+
 def find_closest_audio(input_text, pet_type: PetType):
-    # Initialize models
-    text_encoder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+    """Finds the closest matching audio file for a given input text."""
     audio_files, text_embeddings = None, None  # Initialize variables
 
     if pet_type == PetType.DOG:
-        # Load stored embeddings for DOG
         with open("models/dog_text_embeddings.pkl", "rb") as f:
             data = pickle.load(f)
             audio_files = data["audio_files"]
             text_embeddings = data["text_embeddings"]
 
     elif pet_type == PetType.CAT:
-        # Load stored embeddings for CAT
         with open("models/cat_text_embeddings.pkl", "rb") as f:
             data = pickle.load(f)
             audio_files = data["audio_files"]
             text_embeddings = data["text_embeddings"]
 
-    # Check if text_embeddings was initialized
     if text_embeddings is None:
         return {
             "error": "Invalid pet type provided.",
             "status": "error"
         }
 
-    input_embedding = text_encoder.encode([input_text])[0]
+    input_embedding = encode_text(input_text)
     distances = [cosine(input_embedding, text_embedding) for text_embedding in text_embeddings]
     best_match_idx = np.argmin(distances)
+
     return {
         'matched_audio': audio_files[best_match_idx],
         'confidence_score': 1 - distances[best_match_idx]  # Convert distance to confidence score
