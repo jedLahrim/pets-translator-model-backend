@@ -1,14 +1,18 @@
+import json
 import os
 import pickle
 import tempfile
 import time
 from typing import Dict
+from urllib.parse import quote
 
 import librosa
 import numpy as np
 import onnx
 import onnxruntime as ort
 from flask import Flask, request, jsonify
+from scipy.spatial.distance import cosine
+from sentence_transformers import SentenceTransformer
 from translate import Translator
 from werkzeug.utils import secure_filename
 
@@ -74,68 +78,88 @@ def translate():
     start_time = time.time()
     print(f"\n=== Starting translation request at {time.strftime('%Y-%m-%d %H:%M:%S')} ===")
 
-    if 'audio_file' not in request.files:
-        return jsonify({"error": "no file uploaded"}), 404
-
-    audio_file = request.files['audio_file']
-    pet_type = request.args.get('pet_type')
-    language_code = request.args.get('language_code')
-
-    print(f"Request params - Pet type: {pet_type}, Language: {language_code}")
-    print(f"File received - Name: {audio_file.filename}, Size: {len(audio_file.read()) / 1024:.2f}KB")
-    audio_file.seek(0)
-
-    if not pet_type or not language_code:
-        return jsonify({"error": "Missing required parameters"}), 400
-
-    file_size = len(audio_file.read())
-    audio_file.seek(0)
-    max_size = 10 * 1024 * 1024
-    if file_size > max_size:
-        return jsonify({"error": "File size exceeds 10 MB limit."}), 400
-
     try:
+        if 'audio_file' not in request.files:
+            return jsonify({"error": "no file uploaded"}), 404
+
+        audio_file = request.files['audio_file']
+        pet_type = request.args.get('pet_type')
+        language_code = request.args.get('language_code')
+
+        print(f"Request params - Pet type: {pet_type}, Language: {language_code}")
+        print(f"File received - Name: {audio_file.filename}, Size: {len(audio_file.read()) / 1024:.2f}KB")
+        audio_file.seek(0)
+
+        if not pet_type or not language_code:
+            return jsonify({"error": "Missing required parameters"}), 400
+
+        file_size = len(audio_file.read())
+        audio_file.seek(0)
+        max_size = 10 * 1024 * 1024
+        if file_size > max_size:
+            return jsonify({"error": "File size exceeds 10 MB limit."}), 400
+
         # Feature extraction timing
         feature_start = time.time()
-        pet_type = PetType[pet_type.upper()]
-        filename = secure_filename(audio_file.filename)
-        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1]) as temp_file:
-            audio_file.save(temp_file.name)
-            file_path = temp_file.name
+        try:
+            pet_type = PetType[pet_type.upper()]
+            filename = secure_filename(audio_file.filename)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1]) as temp_file:
+                audio_file.save(temp_file.name)
+                file_path = temp_file.name
 
-        feature = extract_features(file_path)
-        os.unlink(file_path)
-        print(f"Feature extraction took: {time.time() - feature_start:.2f} seconds")
+            feature = extract_features(file_path)
+            os.unlink(file_path)
+            print(f"Feature extraction took: {time.time() - feature_start:.2f} seconds")
 
-        if feature is None:
-            return jsonify({"error": "Error processing the file"}), 400
+            if feature is None:
+                return jsonify({"error": "Error processing the file"}), 400
+
+        except Exception as e:
+            print(f"Feature extraction error: {str(e)}")
+            return jsonify({"error": "Error during feature extraction."}), 500
 
         # Model loading timing
         model_start = time.time()
-        feature = np.expand_dims(feature, axis=0)
-        feature = feature[..., np.newaxis]
-        feature = feature.astype(np.float32)
+        try:
+            feature = np.expand_dims(feature, axis=0)
+            feature = feature[..., np.newaxis]
+            feature = feature.astype(np.float32)
 
-        ort_session, label_encoder, LABEL = load_models(pet_type)
-        print(f"Model loading took: {time.time() - model_start:.2f} seconds")
+            ort_session, label_encoder, LABEL = load_models(pet_type)
+            print(f"Model loading took: {time.time() - model_start:.2f} seconds")
+
+        except Exception as e:
+            print(f"Model loading error: {str(e)}")
+            return jsonify({"error": "Error loading models."}), 500
 
         # Prediction timing
         predict_start = time.time()
-        input_name = ort_session.get_inputs()[0].name
-        output_name = ort_session.get_outputs()[0].name
-        prediction = ort_session.run([output_name], {input_name: feature})[0]
-        pred_label = label_encoder.inverse_transform([np.argmax(prediction)])
-        print(f"Prediction took: {time.time() - predict_start:.2f} seconds")
+        try:
+            input_name = ort_session.get_inputs()[0].name
+            output_name = ort_session.get_outputs()[0].name
+            prediction = ort_session.run([output_name], {input_name: feature})[0]
+            pred_label = label_encoder.inverse_transform([np.argmax(prediction)])
+            print(f"Prediction took: {time.time() - predict_start:.2f} seconds")
+
+        except Exception as e:
+            print(f"Prediction error: {str(e)}")
+            return jsonify({"error": "Error during prediction."}), 500
 
         # Translation timing
         translation_start = time.time()
-        text = pred_label[0]
-        default_label = f'{pet_type.name} label'.capitalize()
-        label = LABEL.get(text, default_label)
-        if not label:
-            label = default_label
-        [translated_text, translated_label] = translate_text([text, label], language_code)
-        print(f"Translation took: {time.time() - translation_start:.2f} seconds")
+        try:
+            text = pred_label[0]
+            default_label = f'{pet_type.name} label'.capitalize()
+            label = LABEL.get(text, default_label)
+            if not label:
+                label = default_label
+            [translated_text, translated_label] = translate_text([text, label], language_code)
+            print(f"Translation took: {time.time() - translation_start:.2f} seconds")
+
+        except Exception as e:
+            print(f"Translation error: {str(e)}")
+            return jsonify({"error": "Error during translation."}), 500
 
         total_time = time.time() - start_time
         print(f"=== Total request processing time: {total_time:.2f} seconds ===\n")
@@ -143,8 +167,131 @@ def translate():
         return jsonify({"text": translated_text, "label": translated_label})
 
     except Exception as e:
-        print(f"Error occurred: {str(e)}")
-        return jsonify({"error": f"Error during prediction: {str(e)}"}), 500
+        print(f"General error occurred: {str(e)}")
+        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
+
+
+UPLOAD_FOLDER = 'temp_uploads'
+ALLOWED_EXTENSIONS = {'wav', 'mp3', 'ogg', 'aac'}
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+# Ensure upload directory exists
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# Initialize models
+text_encoder = SentenceTransformer("models/cat_text_encoder")
+
+# Load stored embeddings
+with open("models/cat_text_embeddings.pkl", "rb") as f:
+    data = pickle.load(f)
+    audio_files = data["audio_files"]
+    text_embeddings = data["text_embeddings"]
+
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+import http.client
+import mimetypes
+import os
+
+
+def transcribe_audio(filepath):
+    try:
+        conn = http.client.HTTPSConnection("whisper-speech-to-text1.p.rapidapi.com")
+
+        # Prepare multipart form data
+        filename = os.path.basename(filepath)
+        file_type, _ = mimetypes.guess_type(filepath)
+
+        # Open the file in binary read mode
+        with open(filepath, 'rb') as audio_file:
+            # Create multipart payload
+            boundary = "---011000010111000001101001"
+            payload = f"--{boundary}\r\n"
+            payload += f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+            payload += f'Content-Type: {file_type or "audio/mpeg"}\r\n\r\n'
+            payload = payload.encode('utf-8') + audio_file.read() + f"\r\n--{boundary}--\r\n".encode('utf-8')
+
+        headers = {
+            'x-rapidapi-key': "c9a76cdc95msh9e96e12f2102067p1654bajsnd47e95803a41",
+            'x-rapidapi-host': "whisper-speech-to-text1.p.rapidapi.com",
+            'Content-Type': f"multipart/form-data; boundary={boundary}"
+        }
+
+        conn.request("POST", "/speech-to-text", payload, headers)
+        res = conn.getresponse()
+        data = res.read()
+
+        # Decode and return the transcription
+        transcription = data.decode("utf-8").strip()
+        return transcription
+
+    except Exception as e:
+        print(f"Whisper transcription error: {str(e)}")
+        raise
+
+
+def find_closest_audio(input_text):
+    input_embedding = text_encoder.encode([input_text])[0]
+    distances = [cosine(input_embedding, text_embedding) for text_embedding in text_embeddings]
+    best_match_idx = np.argmin(distances)
+    return {
+        'matched_audio': audio_files[best_match_idx],
+        'confidence_score': 1 - distances[best_match_idx]  # Convert distance to confidence score
+    }
+
+
+@app.route('/process_audio', methods=['POST'])
+def process_audio():
+    try:
+        # Check if a file was uploaded
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No selected file'}), 400
+
+        if not allowed_file(file.filename):
+            return jsonify({'error': 'Invalid file type'}), 400
+
+        # Save the uploaded file temporarily
+        filename = secure_filename(file.filename)
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+
+        try:
+            # Transcribe the audio using OpenAI Whisper
+            transcription = transcribe_audio(filepath)
+            transcriptionData = json.loads(transcription)
+            text = transcriptionData['text']
+            # Find the closest matching audio
+            result = find_closest_audio(text)
+
+            # Clean up the temporary file
+            os.remove(filepath)
+            matched_audio = result.get('matched_audio')
+            encoded_audio = quote(matched_audio)
+            return jsonify({
+                'matched_audio_url': f'https://lingopet.mos.us-south-1.sufybkt.com/{encoded_audio}',
+            })
+
+        except Exception as e:
+            # Clean up the temporary file in case of error
+            if os.path.exists(filepath):
+                os.remove(filepath)
+            return jsonify({
+                'error': f'Transcription error: {str(e)}',
+                'status': 'error'
+            }), 500
+
+    except Exception as e:
+        return jsonify({
+            'error': str(e),
+            'status': 'error'
+        }), 500
 
 
 if __name__ == '__main__':
