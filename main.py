@@ -6,6 +6,7 @@ import time
 from typing import Dict
 from urllib.parse import quote
 
+from flask_cors import CORS
 import librosa
 import numpy as np
 import onnx
@@ -20,7 +21,7 @@ from label.labels import DOG_LABEL_TYPE, CAT_LABEL_TYPE
 from pet_type import PetType
 
 app = Flask(__name__)
-
+CORS(app)
 
 def load_models(pet_type: PetType):
     ort_session = {}
