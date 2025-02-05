@@ -180,7 +180,7 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # Initialize models
-text_encoder = SentenceTransformer("models/cat_text_encoder")
+text_encoder = SentenceTransformer("models/pet_text_encoder")
 
 # Load stored embeddings
 with open("models/cat_text_embeddings.pkl", "rb") as f:
