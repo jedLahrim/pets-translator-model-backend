@@ -1,4 +1,3 @@
-import json
 import os
 import pickle
 import tempfile
@@ -6,14 +5,16 @@ import time
 from typing import Dict
 from urllib.parse import quote
 
-from flask_cors import CORS
 import librosa
 import numpy as np
 import onnx
 import onnxruntime as ort
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 from scipy.spatial.distance import cosine
 from sentence_transformers import SentenceTransformer
+from speechmatics.batch_client import BatchClient
+from speechmatics.models import ConnectionSettings
 from translate import Translator
 from werkzeug.utils import secure_filename
 
@@ -22,6 +23,7 @@ from pet_type import PetType
 
 app = Flask(__name__)
 CORS(app)
+
 
 def load_models(pet_type: PetType):
     ort_session = {}
@@ -179,62 +181,65 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 # Ensure upload directory exists
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# Initialize models
-text_encoder = SentenceTransformer("models/pet_text_encoder")
-
-# Load stored embeddings
-with open("models/cat_text_embeddings.pkl", "rb") as f:
-    data = pickle.load(f)
-    audio_files = data["audio_files"]
-    text_embeddings = data["text_embeddings"]
-
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-import http.client
-import mimetypes
-import os
-
-
-def transcribe_audio(filepath):
+def transcribe_audio(filepath, language_code='en'):
     try:
-        conn = http.client.HTTPSConnection("whisper-speech-to-text1.p.rapidapi.com")
+        settings = ConnectionSettings(
+            url="https://asr.api.speechmatics.com/v2",
+            auth_token="He1Vx16DbyA2IO8zuzgQFHyhcWCEfCTe",
+        )
 
-        # Prepare multipart form data
-        filename = os.path.basename(filepath)
-        file_type, _ = mimetypes.guess_type(filepath)
-
-        # Open the file in binary read mode
-        with open(filepath, 'rb') as audio_file:
-            # Create multipart payload
-            boundary = "---011000010111000001101001"
-            payload = f"--{boundary}\r\n"
-            payload += f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
-            payload += f'Content-Type: {file_type or "audio/mpeg"}\r\n\r\n'
-            payload = payload.encode('utf-8') + audio_file.read() + f"\r\n--{boundary}--\r\n".encode('utf-8')
-
-        headers = {
-            'x-rapidapi-key': "c9a76cdc95msh9e96e12f2102067p1654bajsnd47e95803a41",
-            'x-rapidapi-host': "whisper-speech-to-text1.p.rapidapi.com",
-            'Content-Type': f"multipart/form-data; boundary={boundary}"
+        # Define transcription parameters
+        conf = {
+            "type": "transcription",
+            "transcription_config": {
+                "language": language_code
+            }
         }
-
-        conn.request("POST", "/speech-to-text", payload, headers)
-        res = conn.getresponse()
-        data = res.read()
-
-        # Decode and return the transcription
-        transcription = data.decode("utf-8").strip()
-        return transcription
+        # Open the client using a context manager
+        with BatchClient(settings) as client:
+            job_id = client.submit_job(
+                audio=filepath,
+                transcription_config=conf,
+            )
+            transcript = client.wait_for_completion(job_id, transcription_format='txt')
+        return transcript
 
     except Exception as e:
         print(f"Whisper transcription error: {str(e)}")
         raise
 
 
-def find_closest_audio(input_text):
+def find_closest_audio(input_text, pet_type: PetType):
+    # Initialize models
+    text_encoder = SentenceTransformer("models/pet_text_encoder")
+    audio_files, text_embeddings = None, None  # Initialize variables
+
+    if pet_type == PetType.DOG:
+        # Load stored embeddings for DOG
+        with open("models/dog_text_embeddings.pkl", "rb") as f:
+            data = pickle.load(f)
+            audio_files = data["audio_files"]
+            text_embeddings = data["text_embeddings"]
+
+    elif pet_type == PetType.CAT:
+        # Load stored embeddings for CAT
+        with open("models/cat_text_embeddings.pkl", "rb") as f:
+            data = pickle.load(f)
+            audio_files = data["audio_files"]
+            text_embeddings = data["text_embeddings"]
+
+    # Check if text_embeddings was initialized
+    if text_embeddings is None:
+        return {
+            "error": "Invalid pet type provided.",
+            "status": "error"
+        }
+
     input_embedding = text_encoder.encode([input_text])[0]
     distances = [cosine(input_embedding, text_embedding) for text_embedding in text_embeddings]
     best_match_idx = np.argmin(distances)
@@ -251,25 +256,34 @@ def process_audio():
         if 'file' not in request.files:
             return jsonify({'error': 'No file provided'}), 400
 
-        file = request.files['file']
-        if file.filename == '':
+        audio_file = request.files['file']
+        if audio_file.filename == '':
             return jsonify({'error': 'No selected file'}), 400
 
-        if not allowed_file(file.filename):
+        if not allowed_file(audio_file.filename):
             return jsonify({'error': 'Invalid file type'}), 400
 
+        pet_type = request.args.get('pet_type')
+        language_code = request.args.get('language_code')
+        if not pet_type or not language_code:
+            return jsonify({"error": "Missing required parameters pet_type and language_code"}), 400
+
+        # file_size = len(audio_file.read())
+        # max_size = 10 * 1024 * 1024
+        # if file_size > max_size:
+        #     return jsonify({"error": "File size exceeds 10 MB limit."}), 400
+
         # Save the uploaded file temporarily
-        filename = secure_filename(file.filename)
+        filename = secure_filename(audio_file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
+        audio_file.save(filepath)
 
         try:
             # Transcribe the audio using OpenAI Whisper
-            transcription = transcribe_audio(filepath)
-            transcriptionData = json.loads(transcription)
-            text = transcriptionData['text']
+            transcription = transcribe_audio(filepath, language_code=language_code)
             # Find the closest matching audio
-            result = find_closest_audio(text)
+            pet_type = PetType[pet_type.upper()]
+            result = find_closest_audio(transcription, pet_type)
 
             # Clean up the temporary file
             os.remove(filepath)

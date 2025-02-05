@@ -13,4 +13,4 @@ werkzeug~=3.0.3
 asgiref
 setuptools>=58.0.0
 wheel
-speechbrain
+speechmatics-python
