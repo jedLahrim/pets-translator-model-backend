@@ -1,13 +1,14 @@
 flask
 flask-cors
 librosa
-numpy
+numpy==1.23.5
 onnx
 onnxruntime
-scipy
+scipy==1.10.1
 speechmatics
 transformers
 translate
 werkzeug
 gunicorn
 torch
+whisper
