@@ -4,7 +4,7 @@ import tempfile
 import time
 from typing import Dict
 from urllib.parse import quote
-
+import spacy
 import librosa
 import numpy as np
 import onnx
@@ -12,7 +12,6 @@ import onnxruntime as ort
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from scipy.spatial.distance import cosine
-from sentence_transformers import SentenceTransformer
 from speechmatics.batch_client import BatchClient
 from speechmatics.models import ConnectionSettings
 from translate import Translator
@@ -214,10 +213,16 @@ def transcribe_audio(filepath, language_code='en'):
         raise
 
 
+nlp = spacy.load("en_core_web_sm")
+
+def encode_text(text):
+    """Encode text using spaCy."""
+    doc = nlp(text)
+    return doc.vector  # Returns the vector representation of the text
+
 def find_closest_audio(input_text, pet_type: PetType):
-    # Initialize models
-    text_encoder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-    audio_files, text_embeddings = None, None  # Initialize variables
+    # Initialize variables
+    audio_files, text_embeddings = None, None
 
     if pet_type == PetType.DOG:
         # Load stored embeddings for DOG
@@ -240,9 +245,13 @@ def find_closest_audio(input_text, pet_type: PetType):
             "status": "error"
         }
 
-    input_embedding = text_encoder.encode([input_text])[0]
+    # Encode the input text
+    input_embedding = encode_text(input_text)
+
+    # Calculate cosine distances
     distances = [cosine(input_embedding, text_embedding) for text_embedding in text_embeddings]
     best_match_idx = np.argmin(distances)
+
     return {
         'matched_audio': audio_files[best_match_idx],
         'confidence_score': 1 - distances[best_match_idx]  # Convert distance to confidence score
