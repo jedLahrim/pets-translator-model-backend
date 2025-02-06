@@ -4,16 +4,18 @@ import tempfile
 import time
 from typing import Dict
 from urllib.parse import quote
-import spacy
+
 import librosa
 import numpy as np
 import onnx
 import onnxruntime as ort
+import torch
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from scipy.spatial.distance import cosine
 from speechmatics.batch_client import BatchClient
 from speechmatics.models import ConnectionSettings
+from transformers import AutoTokenizer, AutoModel
 from translate import Translator
 from werkzeug.utils import secure_filename
 
@@ -213,12 +215,18 @@ def transcribe_audio(filepath, language_code='en'):
         raise
 
 
-nlp = spacy.load("en_core_web_sm")
+MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+model = AutoModel.from_pretrained(MODEL_NAME)
+
 
 def encode_text(text):
-    """Encode text using spaCy."""
-    doc = nlp(text)
-    return doc.vector  # Returns the vector representation of the text
+    """Encodes text using a lightweight transformer model."""
+    inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True)
+    with torch.no_grad():  # Disable gradients for inference
+        output = model(**inputs)
+    return output.last_hidden_state.mean(dim=1).squeeze().numpy()
+
 
 def find_closest_audio(input_text, pet_type: PetType):
     # Initialize variables

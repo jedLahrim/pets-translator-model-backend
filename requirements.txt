@@ -6,7 +6,8 @@ onnx
 onnxruntime
 scipy
 speechmatics-python
-spacy
 translate
 werkzeug
 gunicorn
+torch
+transformers
