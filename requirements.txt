@@ -7,9 +7,6 @@ onnxruntime
 scipy
 speechmatics-python
 sentence_transformers
-transformers
 translate
 werkzeug
 gunicorn
-torch
-whisper
