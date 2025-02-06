@@ -5,7 +5,7 @@ numpy
 onnx
 onnxruntime
 scipy==1.10.1
-speechmatics
+speechmatics-python
 sentence_transformers
 transformers
 translate
