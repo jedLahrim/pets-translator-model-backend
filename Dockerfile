@@ -1,4 +1,4 @@
-FROM python:3.5-slim
+FROM python:3.8-slim  # Updated Python version
 WORKDIR /
 RUN pip install --upgrade pip
 COPY requirements.txt .
