@@ -1,3 +1,4 @@
+gunicorn
 numpy
 scipy
 sentence_transformers
