@@ -7,6 +7,5 @@ onnx
 onnxruntime
 Flask
 Flask-CORS
-speechmatics-python
 translate
 werkzeug

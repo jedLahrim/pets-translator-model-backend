@@ -15,8 +15,6 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from scipy.spatial.distance import cosine
 from sentence_transformers import SentenceTransformer
-from speechmatics.batch_client import BatchClient
-from speechmatics.models import ConnectionSettings
 from translate import Translator
 from werkzeug.utils import secure_filename
 
@@ -116,22 +114,22 @@ class Translator:
             return {"error": str(e), "status": "error"}
 
 
-class AudioTranscriber:
-    @staticmethod
-    def transcribe_audio(filepath: str, language_code: str = 'en') -> str:
-        settings = ConnectionSettings(
-            url=SPEECHMATICS_API_URL,
-            auth_token=SPEECHMATICS_AUTH_TOKEN,
-        )
-
-        conf = {
-            "type": "transcription",
-            "transcription_config": {"language": language_code}
-        }
-
-        with BatchClient(settings) as client:
-            job_id = client.submit_job(audio=filepath, transcription_config=conf)
-            return client.wait_for_completion(job_id, transcription_format='txt')
+# class AudioTranscriber:
+#     @staticmethod
+#     def transcribe_audio(filepath: str, language_code: str = 'en') -> str:
+#         settings = ConnectionSettings(
+#             url=SPEECHMATICS_API_URL,
+#             auth_token=SPEECHMATICS_AUTH_TOKEN,
+#         )
+#
+#         conf = {
+#             "type": "transcription",
+#             "transcription_config": {"language": language_code}
+#         }
+#
+#         with BatchClient(settings) as client:
+#             job_id = client.submit_job(audio=filepath, transcription_config=conf)
+#             return client.wait_for_completion(job_id, transcription_format='txt')
 
 
 # Flask application setup
