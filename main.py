@@ -2,14 +2,16 @@ import os
 import pickle
 import tempfile
 import time
-from typing import Dict
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, List, Optional, Any
 from urllib.parse import quote
 
 import librosa
 import numpy as np
 import onnx
 import onnxruntime as ort
-from flask import Flask, request, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 from scipy.spatial.distance import cosine
 from sentence_transformers import SentenceTransformer
@@ -21,44 +23,130 @@ from werkzeug.utils import secure_filename
 from label.labels import DOG_LABEL_TYPE, CAT_LABEL_TYPE
 from pet_type import PetType
 
+# Configuration
+UPLOAD_FOLDER = Path('temp_uploads')
+ALLOWED_EXTENSIONS = {'wav', 'mp3', 'ogg', 'aac'}
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+SPEECHMATICS_API_URL = "https://asr.api.speechmatics.com/v2"
+SPEECHMATICS_AUTH_TOKEN = "He1Vx16DbyA2IO8zuzgQFHyhcWCEfCTe"
+
+
+@dataclass
+class ModelConfig:
+    ort_session: ort.InferenceSession
+    label_encoder: Any
+    label_types: Dict[str, str]
+
+
+class AudioProcessor:
+    def __init__(self, n_mfcc: int = 40, max_length: int = 200):
+        self.n_mfcc = n_mfcc
+        self.max_length = max_length
+
+    def extract_features(self, file_path: str) -> Optional[np.ndarray]:
+        try:
+            audio, sample_rate = librosa.load(file_path, sr=None)
+            mfcc = librosa.feature.mfcc(y=audio, sr=sample_rate, n_mfcc=self.n_mfcc)
+            mfcc = np.pad(
+                mfcc,
+                ((0, 0), (0, max(0, self.max_length - mfcc.shape[1]))),
+                mode='constant'
+            )
+            return mfcc[:, :self.max_length]
+        except Exception as e:
+            print(f"Error processing {file_path}: {e}")
+            return None
+
+
+class ModelLoader:
+    @staticmethod
+    def load_models(pet_type: PetType) -> ModelConfig:
+        if pet_type == PetType.CAT:
+            return ModelLoader._load_pet_model("cat")
+        elif pet_type == PetType.DOG:
+            return ModelLoader._load_pet_model("dog")
+        raise ValueError(f"Unsupported pet type: {pet_type}")
+
+    @staticmethod
+    def _load_pet_model(pet_name: str) -> ModelConfig:
+        model_path = f"models/{pet_name}_translator_model.onnx"
+        encoder_path = f"models/{pet_name}_label_encoder.pkl"
+
+        onnx_model = onnx.load(model_path)
+        ort_session = ort.InferenceSession(model_path)
+
+        with open(encoder_path, "rb") as f:
+            label_encoder = pickle.load(f)
+
+        label_types = CAT_LABEL_TYPE if pet_name == "cat" else DOG_LABEL_TYPE
+
+        return ModelConfig(ort_session, label_encoder, label_types)
+
+
+class Translator:
+    def __init__(self):
+        self.text_encoder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+
+    def translate_text(self, texts: List[str], language_code: str) -> Optional[List[str]]:
+        translator = Translator(to_lang=language_code)
+        try:
+            return [translator.translate(text) for text in texts]
+        except Exception as e:
+            print(f"Translation error: {e}")
+            return None
+
+    def find_closest_audio(self, input_text: str, pet_type: PetType) -> Dict:
+        try:
+            embeddings_file = f"models/{pet_type.name.lower()}_text_embeddings.pkl"
+
+            with open(embeddings_file, "rb") as f:
+                data = pickle.load(f)
+                audio_files = data["audio_files"]
+                text_embeddings = data["text_embeddings"]
+
+            input_embedding = self.text_encoder.encode([input_text])[0]
+            distances = [cosine(input_embedding, embed) for embed in text_embeddings]
+            best_match_idx = np.argmin(distances)
+
+            return {
+                'matched_audio': audio_files[best_match_idx],
+                'confidence_score': 1 - distances[best_match_idx]
+            }
+        except Exception as e:
+            return {"error": str(e), "status": "error"}
+
+
+class AudioTranscriber:
+    @staticmethod
+    def transcribe_audio(filepath: str, language_code: str = 'en') -> str:
+        settings = ConnectionSettings(
+            url=SPEECHMATICS_API_URL,
+            auth_token=SPEECHMATICS_AUTH_TOKEN,
+        )
+
+        conf = {
+            "type": "transcription",
+            "transcription_config": {"language": language_code}
+        }
+
+        with BatchClient(settings) as client:
+            job_id = client.submit_job(audio=filepath, transcription_config=conf)
+            return client.wait_for_completion(job_id, transcription_format='txt')
+
+
+# Flask application setup
 app = Flask(__name__)
 CORS(app)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+UPLOAD_FOLDER.mkdir(exist_ok=True)
+
+# Initialize services
+audio_processor = AudioProcessor()
+translator = Translator()
 
 
-def load_models(pet_type: PetType):
-    ort_session = {}
-    label_encoder = {}
-    LABEL: Dict[str, str] = {}
-    if pet_type == PetType.CAT:
-        LABEL = CAT_LABEL_TYPE
-        onnx_cat_model = onnx.load("models/cat_translator_model.onnx")
-        ort_cat_session = ort.InferenceSession("models/cat_translator_model.onnx")
-        with open("models/cat_label_encoder.pkl", "rb") as f:
-            cat_label_encoder = pickle.load(f)
-            ort_session = ort_cat_session
-            label_encoder = cat_label_encoder
-
-    elif pet_type == PetType.DOG:
-        LABEL = DOG_LABEL_TYPE
-        onnx_dog_model = onnx.load("models/dog_translator_model.onnx")
-        ort_dog_session = ort.InferenceSession("models/dog_translator_model.onnx")
-        with open("models/dog_label_encoder.pkl", "rb") as f:
-            dog_label_encoder = pickle.load(f)
-            ort_session = ort_dog_session
-            label_encoder = dog_label_encoder
-
-    return ort_session, label_encoder, LABEL
-
-
-def extract_features(file_path, n_mfcc=40, max_length=200):
-    try:
-        audio, sample_rate = librosa.load(file_path, sr=None)
-        mfcc = librosa.feature.mfcc(y=audio, sr=sample_rate, n_mfcc=n_mfcc)
-        mfcc = np.pad(mfcc, ((0, 0), (0, max(0, max_length - mfcc.shape[1]))), mode='constant')
-        return mfcc[:, :max_length]
-    except Exception as e:
-        print(f"Error processing {file_path}: {e}")
-        return None
+def allowed_file(filename: str) -> bool:
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
 @app.route("/")
@@ -66,22 +154,13 @@ def welcome():
     return jsonify({"message": "hello from the server"})
 
 
-def translate_text(texts: list, language_code: str):
-    translator = Translator(to_lang=language_code)
-    try:
-        results = [translator.translate(text) for text in texts]
-        return results
-    except Exception as e:
-        print(f"Error: {e}")
-        return None
-
-
 @app.route("/translate", methods=['POST'])
-def translate():
+def translate_route():
     start_time = time.time()
     print(f"\n=== Starting translation request at {time.strftime('%Y-%m-%d %H:%M:%S')} ===")
 
     try:
+        # Validate request
         if 'audio_file' not in request.files:
             return jsonify({"error": "no file uploaded"}), 404
 
@@ -89,218 +168,78 @@ def translate():
         pet_type = request.args.get('pet_type')
         language_code = request.args.get('language_code')
 
-        print(f"Request params - Pet type: {pet_type}, Language: {language_code}")
-        print(f"File received - Name: {audio_file.filename}, Size: {len(audio_file.read()) / 1024:.2f}KB")
-        audio_file.seek(0)
-
-        if not pet_type or not language_code:
+        if not all([pet_type, language_code]):
             return jsonify({"error": "Missing required parameters"}), 400
 
-        file_size = len(audio_file.read())
+        # Validate file size
+        audio_file.seek(0, 2)
+        file_size = audio_file.tell()
         audio_file.seek(0)
-        max_size = 10 * 1024 * 1024
-        if file_size > max_size:
+
+        if file_size > MAX_FILE_SIZE:
             return jsonify({"error": "File size exceeds 10 MB limit."}), 400
 
-        # Feature extraction timing
-        feature_start = time.time()
-        try:
-            pet_type = PetType[pet_type.upper()]
-            filename = secure_filename(audio_file.filename)
-            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1]) as temp_file:
-                audio_file.save(temp_file.name)
-                file_path = temp_file.name
+        # Process audio file
+        filename = secure_filename(audio_file.filename)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(filename).suffix) as temp_file:
+            audio_file.save(temp_file.name)
+            feature = audio_processor.extract_features(temp_file.name)
+            os.unlink(temp_file.name)
 
-            feature = extract_features(file_path)
-            os.unlink(file_path)
-            print(f"Feature extraction took: {time.time() - feature_start:.2f} seconds")
+        if feature is None:
+            return jsonify({"error": "Error processing the file"}), 400
 
-            if feature is None:
-                return jsonify({"error": "Error processing the file"}), 400
+        # Load model and make prediction
+        pet_type_enum = PetType[pet_type.upper()]
+        model_config = ModelLoader.load_models(pet_type_enum)
 
-        except Exception as e:
-            print(f"Feature extraction error: {str(e)}")
-            return jsonify({"error": "Error during feature extraction."}), 500
+        feature = np.expand_dims(feature, axis=(0, -1)).astype(np.float32)
+        input_name = model_config.ort_session.get_inputs()[0].name
+        output_name = model_config.ort_session.get_outputs()[0].name
+        prediction = model_config.ort_session.run([output_name], {input_name: feature})[0]
+        pred_label = model_config.label_encoder.inverse_transform([np.argmax(prediction)])[0]
 
-        # Model loading timing
-        model_start = time.time()
-        try:
-            feature = np.expand_dims(feature, axis=0)
-            feature = feature[..., np.newaxis]
-            feature = feature.astype(np.float32)
+        # Translate results
+        default_label = f'{pet_type_enum.name} label'.capitalize()
+        label = model_config.label_types.get(pred_label, default_label)
+        translated_results = translator.translate_text([pred_label, label], language_code)
 
-            ort_session, label_encoder, LABEL = load_models(pet_type)
-            print(f"Model loading took: {time.time() - model_start:.2f} seconds")
+        if not translated_results:
+            return jsonify({"error": "Translation failed"}), 500
 
-        except Exception as e:
-            print(f"Model loading error: {str(e)}")
-            return jsonify({"error": "Error loading models."}), 500
-
-        # Prediction timing
-        predict_start = time.time()
-        try:
-            input_name = ort_session.get_inputs()[0].name
-            output_name = ort_session.get_outputs()[0].name
-            prediction = ort_session.run([output_name], {input_name: feature})[0]
-            pred_label = label_encoder.inverse_transform([np.argmax(prediction)])
-            print(f"Prediction took: {time.time() - predict_start:.2f} seconds")
-
-        except Exception as e:
-            print(f"Prediction error: {str(e)}")
-            return jsonify({"error": "Error during prediction."}), 500
-
-        # Translation timing
-        translation_start = time.time()
-        try:
-            text = pred_label[0]
-            default_label = f'{pet_type.name} label'.capitalize()
-            label = LABEL.get(text, default_label)
-            if not label:
-                label = default_label
-            [translated_text, translated_label] = translate_text([text, label], language_code)
-            print(f"Translation took: {time.time() - translation_start:.2f} seconds")
-
-        except Exception as e:
-            print(f"Translation error: {str(e)}")
-            return jsonify({"error": "Error during translation."}), 500
-
-        total_time = time.time() - start_time
-        print(f"=== Total request processing time: {total_time:.2f} seconds ===\n")
-
-        return jsonify({"text": translated_text, "label": translated_label})
+        print(f"=== Total request processing time: {time.time() - start_time:.2f} seconds ===\n")
+        return jsonify({
+            "text": translated_results[0],
+            "label": translated_results[1]
+        })
 
     except Exception as e:
-        print(f"General error occurred: {str(e)}")
-        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
-
-
-UPLOAD_FOLDER = 'temp_uploads'
-ALLOWED_EXTENSIONS = {'wav', 'mp3', 'ogg', 'aac'}
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-
-# Ensure upload directory exists
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
-
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-
-def transcribe_audio(filepath, language_code='en'):
-    try:
-        settings = ConnectionSettings(
-            url="https://asr.api.speechmatics.com/v2",
-            auth_token="He1Vx16DbyA2IO8zuzgQFHyhcWCEfCTe",
-        )
-
-        # Define transcription parameters
-        conf = {
-            "type": "transcription",
-            "transcription_config": {
-                "language": language_code
-            }
-        }
-        # Open the client using a context manager
-        with BatchClient(settings) as client:
-            job_id = client.submit_job(
-                audio=filepath,
-                transcription_config=conf,
-            )
-            transcript = client.wait_for_completion(job_id, transcription_format='txt')
-        return transcript
-
-    except Exception as e:
-        print(f"Whisper transcription error: {str(e)}")
-        raise
-
-
-def find_closest_audio(input_text, pet_type: PetType):
-    # Initialize models
-    text_encoder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-    audio_files, text_embeddings = None, None  # Initialize variables
-
-    if pet_type == PetType.DOG:
-        # Load stored embeddings for DOG
-        with open("models/dog_text_embeddings.pkl", "rb") as f:
-            data = pickle.load(f)
-            audio_files = data["audio_files"]
-            text_embeddings = data["text_embeddings"]
-
-    elif pet_type == PetType.CAT:
-        # Load stored embeddings for CAT
-        with open("models/cat_text_embeddings.pkl", "rb") as f:
-            data = pickle.load(f)
-            audio_files = data["audio_files"]
-            text_embeddings = data["text_embeddings"]
-
-    # Check if text_embeddings was initialized
-    if text_embeddings is None:
-        return {
-            "error": "Invalid pet type provided.",
-            "status": "error"
-        }
-
-    input_embedding = text_encoder.encode([input_text])[0]
-    distances = [cosine(input_embedding, text_embedding) for text_embedding in text_embeddings]
-    best_match_idx = np.argmin(distances)
-    return {
-        'matched_audio': audio_files[best_match_idx],
-        'confidence_score': 1 - distances[best_match_idx]  # Convert distance to confidence score
-    }
+        print(f"Error in translation route: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/process_audio', methods=['POST'])
 def process_audio():
     try:
-        # Check if a file was uploaded
-        if 'file' not in request.files:
-            return jsonify({'error': 'No file provided'}), 400
+        body = request.get_json()
+        pet_type = body.get('pet_type')
+        language_code = body.get('language_code')
+        text = body.get('text')
 
-        audio_file = request.files['file']
-        if audio_file.filename == '':
-            return jsonify({'error': 'No selected file'}), 400
+        if not all([pet_type, language_code, text]):
+            return jsonify({"error": "Missing required parameters"}), 400
 
-        if not allowed_file(audio_file.filename):
-            return jsonify({'error': 'Invalid file type'}), 400
+        pet_type_enum = PetType[pet_type.upper()]
+        result = translator.find_closest_audio(text, pet_type_enum)
 
-        pet_type = request.args.get('pet_type')
-        language_code = request.args.get('language_code')
-        if not pet_type or not language_code:
-            return jsonify({"error": "Missing required parameters pet_type and language_code"}), 400
+        if "error" in result:
+            return jsonify(result), 500
 
-        # file_size = len(audio_file.read())
-        # max_size = 10 * 1024 * 1024
-        # if file_size > max_size:
-        #     return jsonify({"error": "File size exceeds 10 MB limit."}), 400
-
-        # Save the uploaded file temporarily
-        filename = secure_filename(audio_file.filename)
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        audio_file.save(filepath)
-
-        try:
-            # Transcribe the audio using OpenAI Whisper
-            transcription = transcribe_audio(filepath, language_code=language_code)
-            # Find the closest matching audio
-            pet_type = PetType[pet_type.upper()]
-            result = find_closest_audio(transcription, pet_type)
-
-            # Clean up the temporary file
-            os.remove(filepath)
-            matched_audio = result.get('matched_audio')
-            encoded_audio = quote(matched_audio)
-            return jsonify({
-                'matched_audio_url': f'https://lingopet.mos.us-south-1.sufybkt.com/{encoded_audio}',
-            })
-
-        except Exception as e:
-            # Clean up the temporary file in case of error
-            if os.path.exists(filepath):
-                os.remove(filepath)
-            return jsonify({
-                'error': f'Transcription error: {str(e)}',
-                'status': 'error'
-            }), 500
+        matched_audio = result['matched_audio']
+        encoded_audio = quote(matched_audio)
+        return jsonify({
+            'matched_audio_url': f'https://lingopet.mos.us-south-1.sufybkt.com/{encoded_audio}',
+        })
 
     except Exception as e:
         return jsonify({
