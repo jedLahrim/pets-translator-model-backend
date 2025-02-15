@@ -236,7 +236,7 @@ def process_audio():
             matched_audio = result.get('matched_audio')
             encoded_audio = quote(matched_audio)
             return jsonify({
-                'matched_audio_url': f'https://lingopet.mos.us-south-1.sufybkt.com/{encoded_audio}',
+                'matched_audio_url': f'https://petspeak.mos.us-south-1.sufybkt.com/{encoded_audio}',
             })
 
         except Exception as e:
