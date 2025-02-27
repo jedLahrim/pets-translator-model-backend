@@ -9,3 +9,6 @@ Flask
 Flask-CORS
 translate
 werkzeug
+keras
+tensorflow
+tf-keras

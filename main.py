@@ -2,13 +2,13 @@ import os
 import pickle
 import tempfile
 import time
+import gc
 from typing import Dict
 from urllib.parse import quote
 
+import keras
 import librosa
 import numpy as np
-import onnx
-import onnxruntime as ort
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from scipy.spatial.distance import cosine
@@ -22,30 +22,39 @@ from pet_type import PetType
 app = Flask(__name__)
 CORS(app)
 
+# Model cache to avoid reloading models for every request
+_MODEL_CACHE = {}
+_TEXT_ENCODER_CACHE = {}
+_EMBEDDING_CACHE = {}
+
 
 def load_models(pet_type: PetType):
-    ort_session = {}
+    # Check if model is already loaded
+    cache_key = pet_type.name
+    if cache_key in _MODEL_CACHE:
+        return _MODEL_CACHE[cache_key]
+    
+    keras_model = None
     label_encoder = {}
     LABEL: Dict[str, str] = {}
+    
     if pet_type == PetType.CAT:
         LABEL = CAT_LABEL_TYPE
-        onnx_cat_model = onnx.load("models/cat_translator_model.onnx")
-        ort_cat_session = ort.InferenceSession("models/cat_translator_model.onnx")
-        with open("models/cat_label_encoder.pkl", "rb") as f:
+        keras_model = keras.models.load_model("../../models/cat_translator_model.keras")  # Load Keras model
+        with open("../../models/cat_label_encoder.pkl", "rb") as f:
             cat_label_encoder = pickle.load(f)
-            ort_session = ort_cat_session
             label_encoder = cat_label_encoder
 
     elif pet_type == PetType.DOG:
         LABEL = DOG_LABEL_TYPE
-        onnx_dog_model = onnx.load("models/dog_translator_model.onnx")
-        ort_dog_session = ort.InferenceSession("models/dog_translator_model.onnx")
-        with open("models/dog_label_encoder.pkl", "rb") as f:
+        keras_model = keras.models.load_model("../../models/dog_translator_model.keras")  # Load Keras model
+        with open("../../models/dog_label_encoder.pkl", "rb") as f:
             dog_label_encoder = pickle.load(f)
-            ort_session = ort_dog_session
             label_encoder = dog_label_encoder
-
-    return ort_session, label_encoder, LABEL
+    
+    # Cache the results
+    _MODEL_CACHE[cache_key] = (keras_model, label_encoder, LABEL)
+    return _MODEL_CACHE[cache_key]
 
 
 def extract_features(file_path, n_mfcc=40, max_length=200):
@@ -78,6 +87,7 @@ def translate_text(texts: list, language_code: str):
 def translate():
     start_time = time.time()
     print(f"\n=== Starting translation request at {time.strftime('%Y-%m-%d %H:%M:%S')} ===")
+    temp_file_path = None
 
     try:
         if 'audio_file' not in request.files:
@@ -107,10 +117,14 @@ def translate():
             filename = secure_filename(audio_file.filename)
             with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1]) as temp_file:
                 audio_file.save(temp_file.name)
-                file_path = temp_file.name
+                temp_file_path = temp_file.name
 
-            feature = extract_features(file_path)
-            os.unlink(file_path)
+            feature = extract_features(temp_file_path)
+            # Clean up temp file immediately after use
+            if temp_file_path and os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
+                temp_file_path = None
+            
             print(f"Feature extraction took: {time.time() - feature_start:.2f} seconds")
 
             if feature is None:
@@ -118,6 +132,9 @@ def translate():
 
         except Exception as e:
             print(f"Feature extraction error: {str(e)}")
+            # Ensure cleanup in case of error
+            if temp_file_path and os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
             return jsonify({"error": "Error during feature extraction."}), 500
 
         # Model loading timing
@@ -127,7 +144,7 @@ def translate():
             feature = feature[..., np.newaxis]
             feature = feature.astype(np.float32)
 
-            ort_session, label_encoder, LABEL = load_models(pet_type)
+            keras_model, label_encoder, LABEL = load_models(pet_type)
             print(f"Model loading took: {time.time() - model_start:.2f} seconds")
 
         except Exception as e:
@@ -137,11 +154,13 @@ def translate():
         # Prediction timing
         predict_start = time.time()
         try:
-            input_name = ort_session.get_inputs()[0].name
-            output_name = ort_session.get_outputs()[0].name
-            prediction = ort_session.run([output_name], {input_name: feature})[0]
+            prediction = keras_model.predict(feature)
             pred_label = label_encoder.inverse_transform([np.argmax(prediction)])
             print(f"Prediction took: {time.time() - predict_start:.2f} seconds")
+            
+            # Clear feature data to free memory
+            del feature
+            del prediction
 
         except Exception as e:
             print(f"Prediction error: {str(e)}")
@@ -165,10 +184,17 @@ def translate():
         total_time = time.time() - start_time
         print(f"=== Total request processing time: {total_time:.2f} seconds ===\n")
 
-        return jsonify({"text": translated_text, "label": translated_label})
+        result = jsonify({"text": translated_text, "label": translated_label})
+        # Explicit garbage collection
+        gc.collect()
+        return result
 
     except Exception as e:
         print(f"General error occurred: {str(e)}")
+        # Ensure cleanup in case of error
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.unlink(temp_file_path)
+        gc.collect()
         return jsonify({"error": f"An error occurred: {str(e)}"}), 500
 
 
@@ -184,24 +210,46 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-def find_closest_audio(input_text, pet_type: PetType):
-    # Initialize models
-    text_encoder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-    audio_files, text_embeddings = None, None  # Initialize variables
+def load_text_encoder():
+    if 'text_encoder' not in _TEXT_ENCODER_CACHE:
+        _TEXT_ENCODER_CACHE['text_encoder'] = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+    return _TEXT_ENCODER_CACHE['text_encoder']
+
+
+def load_embeddings(pet_type: PetType):
+    cache_key = pet_type.name
+    if cache_key in _EMBEDDING_CACHE:
+        return _EMBEDDING_CACHE[cache_key]
+    
+    audio_files, text_embeddings = None, None
 
     if pet_type == PetType.DOG:
         # Load stored embeddings for DOG
-        with open("models/dog_text_embeddings.pkl", "rb") as f:
+        with open("../../models/dog_text_embeddings.pkl", "rb") as f:
             data = pickle.load(f)
             audio_files = data["audio_files"]
             text_embeddings = data["text_embeddings"]
 
     elif pet_type == PetType.CAT:
         # Load stored embeddings for CAT
-        with open("models/cat_text_embeddings.pkl", "rb") as f:
+        with open("../../models/cat_text_embeddings.pkl", "rb") as f:
             data = pickle.load(f)
             audio_files = data["audio_files"]
             text_embeddings = data["text_embeddings"]
+    
+    if audio_files is not None and text_embeddings is not None:
+        _EMBEDDING_CACHE[cache_key] = (audio_files, text_embeddings)
+        return audio_files, text_embeddings
+    
+    return None, None
+
+
+def find_closest_audio(input_text, pet_type: PetType):
+    # Load text encoder
+    text_encoder = load_text_encoder()
+    
+    # Load embeddings
+    audio_files, text_embeddings = load_embeddings(pet_type)
 
     # Check if text_embeddings was initialized
     if text_embeddings is None:
@@ -213,6 +261,7 @@ def find_closest_audio(input_text, pet_type: PetType):
     input_embedding = text_encoder.encode([input_text])[0]
     distances = [cosine(input_embedding, text_embedding) for text_embedding in text_embeddings]
     best_match_idx = np.argmin(distances)
+    
     return {
         'matched_audio': audio_files[best_match_idx],
         'confidence_score': 1 - distances[best_match_idx]  # Convert distance to confidence score
@@ -235,22 +284,39 @@ def process_audio():
 
             matched_audio = result.get('matched_audio')
             encoded_audio = quote(matched_audio)
-            return jsonify({
+            
+            response = jsonify({
                 'matched_audio_url': f'https://petspeak.mos.us-south-1.sufybkt.com/{encoded_audio}',
             })
+            
+            # Explicit garbage collection
+            gc.collect()
+            return response
 
         except Exception as e:
-            # Clean up the temporary file in case of error
+            # Clean up in case of error
+            gc.collect()
             return jsonify({
                 'error': f'Transcription error: {str(e)}',
                 'status': 'error'
             }), 500
 
     except Exception as e:
+        gc.collect()
         return jsonify({
             'error': str(e),
             'status': 'error'
         }), 500
+
+
+# Clear memory cache on shutdown
+@app.teardown_appcontext
+def cleanup_on_shutdown(exception=None):
+    global _MODEL_CACHE, _TEXT_ENCODER_CACHE, _EMBEDDING_CACHE
+    _MODEL_CACHE.clear()
+    _TEXT_ENCODER_CACHE.clear()
+    _EMBEDDING_CACHE.clear()
+    gc.collect()
 
 
 if __name__ == '__main__':
