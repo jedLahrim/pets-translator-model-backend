@@ -5,10 +5,9 @@ import time
 from typing import Dict
 from urllib.parse import quote
 
+import keras
 import librosa
 import numpy as np
-import onnx
-import onnxruntime as ort
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from scipy.spatial.distance import cosine
@@ -24,28 +23,24 @@ CORS(app)
 
 
 def load_models(pet_type: PetType):
-    ort_session = {}
+    keras_model = None
     label_encoder = {}
     LABEL: Dict[str, str] = {}
     if pet_type == PetType.CAT:
         LABEL = CAT_LABEL_TYPE
-        onnx_cat_model = onnx.load("models/cat_translator_model.onnx")
-        ort_cat_session = ort.InferenceSession("models/cat_translator_model.onnx")
+        keras_model = keras.models.load_model("models/cat_translator_model.keras")  # Load Keras model
         with open("models/cat_label_encoder.pkl", "rb") as f:
             cat_label_encoder = pickle.load(f)
-            ort_session = ort_cat_session
             label_encoder = cat_label_encoder
 
     elif pet_type == PetType.DOG:
         LABEL = DOG_LABEL_TYPE
-        onnx_dog_model = onnx.load("models/dog_translator_model.onnx")
-        ort_dog_session = ort.InferenceSession("models/dog_translator_model.onnx")
+        keras_model = keras.models.load_model("models/dog_translator_model.keras")  # Load Keras model
         with open("models/dog_label_encoder.pkl", "rb") as f:
             dog_label_encoder = pickle.load(f)
-            ort_session = ort_dog_session
             label_encoder = dog_label_encoder
 
-    return ort_session, label_encoder, LABEL
+    return keras_model, label_encoder, LABEL
 
 
 def extract_features(file_path, n_mfcc=40, max_length=200):
@@ -127,7 +122,7 @@ def translate():
             feature = feature[..., np.newaxis]
             feature = feature.astype(np.float32)
 
-            ort_session, label_encoder, LABEL = load_models(pet_type)
+            keras_model, label_encoder, LABEL = load_models(pet_type)
             print(f"Model loading took: {time.time() - model_start:.2f} seconds")
 
         except Exception as e:
@@ -137,9 +132,7 @@ def translate():
         # Prediction timing
         predict_start = time.time()
         try:
-            input_name = ort_session.get_inputs()[0].name
-            output_name = ort_session.get_outputs()[0].name
-            prediction = ort_session.run([output_name], {input_name: feature})[0]
+            prediction = keras_model.predict(feature)
             pred_label = label_encoder.inverse_transform([np.argmax(prediction)])
             print(f"Prediction took: {time.time() - predict_start:.2f} seconds")
 
