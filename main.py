@@ -28,15 +28,15 @@ def load_models(pet_type: PetType):
     LABEL: Dict[str, str] = {}
     if pet_type == PetType.CAT:
         LABEL = CAT_LABEL_TYPE
-        keras_model = keras.models.load_model("models/cat_translator_model.keras")  # Load Keras model
-        with open("models/cat_label_encoder.pkl", "rb") as f:
+        keras_model = keras.models.load_model("../models/cat_translator_model.keras")  # Load Keras model
+        with open("../models/cat_label_encoder.pkl", "rb") as f:
             cat_label_encoder = pickle.load(f)
             label_encoder = cat_label_encoder
 
     elif pet_type == PetType.DOG:
         LABEL = DOG_LABEL_TYPE
-        keras_model = keras.models.load_model("models/dog_translator_model.keras")  # Load Keras model
-        with open("models/dog_label_encoder.pkl", "rb") as f:
+        keras_model = keras.models.load_model("../models/dog_translator_model.keras")  # Load Keras model
+        with open("../models/dog_label_encoder.pkl", "rb") as f:
             dog_label_encoder = pickle.load(f)
             label_encoder = dog_label_encoder
 
@@ -184,14 +184,14 @@ def find_closest_audio(input_text, pet_type: PetType):
 
     if pet_type == PetType.DOG:
         # Load stored embeddings for DOG
-        with open("models/dog_text_embeddings.pkl", "rb") as f:
+        with open("../models/dog_text_embeddings.pkl", "rb") as f:
             data = pickle.load(f)
             audio_files = data["audio_files"]
             text_embeddings = data["text_embeddings"]
 
     elif pet_type == PetType.CAT:
         # Load stored embeddings for CAT
-        with open("models/cat_text_embeddings.pkl", "rb") as f:
+        with open("../models/cat_text_embeddings.pkl", "rb") as f:
             data = pickle.load(f)
             audio_files = data["audio_files"]
             text_embeddings = data["text_embeddings"]
