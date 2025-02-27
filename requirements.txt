@@ -11,3 +11,4 @@ translate
 werkzeug
 keras
 tensorflow
+tf-keras
