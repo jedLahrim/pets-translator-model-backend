@@ -15,7 +15,7 @@ from scipy.spatial.distance import cosine
 from sentence_transformers import SentenceTransformer
 from translate import Translator
 from werkzeug.utils import secure_filename
-
+import base64
 from label.labels import DOG_LABEL_TYPE, CAT_LABEL_TYPE
 from pet_type import PetType
 
