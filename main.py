@@ -275,7 +275,7 @@ def transcribe_audio():
         # Hugging Face API endpoint and headers
         api_url = "https://router.huggingface.co/hf-inference/models/openai/whisper-large-v3-turbo"
         headers = {
-            "Authorization": "Bearer hf_jwt_eyJhbGciOiJIUzI1NiJ9.eyJwZXJtaXNzaW9ucyI6eyJpbmZlcmVuY2Uuc2VydmVybGVzcy53cml0ZSI6dHJ1ZX0sIm9uQmVoYWxmT2YiOnsia2luZCI6InVzZXIiLCJfaWQiOiI2NTE1YmUyZWRhOGEzZDdjZGQ4OTQ2MmUiLCJ1c2VyIjoiamVkMDYifSwiaWF0IjoxNzQxMjIxMjQzLCJzdWIiOiJodHRwczovL3JvdXRlci5odWdnaW5nZmFjZS5jbyIsImV4cCI6MTc0MTIyNDg0MywiaXNzIjoiaHR0cHM6Ly9odWdnaW5nZmFjZS5jbyJ9.rbmBrARFviKVy21P7aJ7N8HQ38IBn1ZTQb3uCv6XcjE",  # Replace with your Hugging Face token
+            "Authorization": "Bearer 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",  # Replace with your Hugging Face token
             "Content-Type": "audio/webm;codecs=opus"
         }
 
