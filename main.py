@@ -78,7 +78,7 @@ def translate_text(texts: list, language_code: str):
 @app.route("/translate", methods=['POST'])
 def translate():
     start_time = time.time()
-    print(f"\n=== Starting translation request at {time.strftime('%Y-%m-%d %H:%M:%S')} ===")
+
 
     try:
         if 'audio_file' not in request.files:
@@ -88,8 +88,7 @@ def translate():
         pet_type = request.args.get('pet_type')
         language_code = request.args.get('language_code')
 
-        print(f"Request params - Pet type: {pet_type}, Language: {language_code}")
-        print(f"File received - Name: {audio_file.filename}, Size: {len(audio_file.read()) / 1024:.2f}KB")
+
         audio_file.seek(0)
 
         if not pet_type or not language_code:
@@ -112,7 +111,6 @@ def translate():
 
             feature = extract_features(file_path)
             os.unlink(file_path)
-            print(f"Feature extraction took: {time.time() - feature_start:.2f} seconds")
 
             if feature is None:
                 return jsonify({"error": "Error processing the file"}), 400
@@ -129,7 +127,6 @@ def translate():
             feature = feature.astype(np.float32)
 
             ort_session, label_encoder, LABEL = load_models(pet_type)
-            print(f"Model loading took: {time.time() - model_start:.2f} seconds")
 
         except Exception as e:
             print(f"Model loading error: {str(e)}")
@@ -142,7 +139,6 @@ def translate():
             output_name = ort_session.get_outputs()[0].name
             prediction = ort_session.run([output_name], {input_name: feature})[0]
             pred_label = label_encoder.inverse_transform([np.argmax(prediction)])
-            print(f"Prediction took: {time.time() - predict_start:.2f} seconds")
 
         except Exception as e:
             print(f"Prediction error: {str(e)}")
@@ -157,14 +153,12 @@ def translate():
             if not label:
                 label = default_label
             [translated_text, translated_label] = translate_text([text, label], language_code)
-            print(f"Translation took: {time.time() - translation_start:.2f} seconds")
 
         except Exception as e:
             print(f"Translation error: {str(e)}")
             return jsonify({"error": "Error during translation."}), 500
 
         total_time = time.time() - start_time
-        print(f"=== Total request processing time: {total_time:.2f} seconds ===\n")
 
         return jsonify({"text": translated_text, "label": translated_label})
 
