@@ -9,3 +9,4 @@ Flask
 Flask-CORS
 translate
 werkzeug
+python-dotenv
