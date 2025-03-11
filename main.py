@@ -19,6 +19,10 @@ import base64
 from label.labels import DOG_LABEL_TYPE, CAT_LABEL_TYPE
 from pet_type import PetType
 import requests
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
@@ -265,11 +269,12 @@ def transcribe_audio():
         with open(file_path, "rb") as f:
             audio_data = f.read()
             encoded_audio = base64.b64encode(audio_data).decode("utf-8")
-
+        
         # Hugging Face API endpoint and headers
         api_url = "https://router.huggingface.co/hf-inference/models/openai/whisper-large-v3-turbo"
+        hf_token = os.getenv("HUGGING_FACE_TOKEN")
         headers = {
-            "Authorization": "Bearer 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",  # Replace with your Hugging Face token
+            "Authorization": f"Bearer {hf_token}",  # Replace with your Hugging Face token
             "Content-Type": "audio/webm;codecs=opus"
         }
 
