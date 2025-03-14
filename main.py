@@ -100,9 +100,9 @@ def translate():
 
         file_size = len(audio_file.read())
         audio_file.seek(0)
-        max_size = 10 * 1024 * 1024
+        max_size = 30 * 1024 * 1024
         if file_size > max_size:
-            return jsonify({"error": "File size exceeds 10 MB limit."}), 400
+            return jsonify({"error": "File size exceeds 30 MB limit."}), 400
 
         # Feature extraction timing
         feature_start = time.time()
