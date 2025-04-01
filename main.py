@@ -83,7 +83,6 @@ def translate_text(texts: list, language_code: str):
 def translate():
     start_time = time.time()
 
-
     try:
         if 'audio_file' not in request.files:
             return jsonify({"error": "no file uploaded"}), 404
@@ -91,7 +90,6 @@ def translate():
         audio_file = request.files['audio_file']
         pet_type = request.args.get('pet_type')
         language_code = request.args.get('language_code')
-
 
         audio_file.seek(0)
 
@@ -183,7 +181,7 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-def find_closest_audio(input_text, pet_type: PetType):
+def find_closest_audio(input_text, pet_type: PetType, num_matches=2):
     # Initialize models
     text_encoder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
     audio_files, text_embeddings = None, None  # Initialize variables
@@ -211,10 +209,21 @@ def find_closest_audio(input_text, pet_type: PetType):
 
     input_embedding = text_encoder.encode([input_text])[0]
     distances = [cosine(input_embedding, text_embedding) for text_embedding in text_embeddings]
-    best_match_idx = np.argmin(distances)
+
+    # Get indices of top N matches (sorted by distance - smaller is better)
+    top_indices = np.argsort(distances)[:num_matches]
+
+    # Create list of matches with their confidence scores
+    matches = []
+    for idx in top_indices:
+        matches.append({
+            'audio_file': audio_files[idx],
+            'confidence_score': float(1 - distances[idx])  # Convert NumPy float32 to Python float
+        })
+
     return {
-        'matched_audio': audio_files[best_match_idx],
-        'confidence_score': 1 - distances[best_match_idx]  # Convert distance to confidence score
+        'matches': matches,
+        'status': 'success'
     }
 
 
@@ -228,20 +237,31 @@ def process_audio():
             return jsonify({"error": "Missing required parameters pet_type, text"}), 400
 
         try:
-            # Find the closest matching audio
+            # Find the closest matching audios (top 2)
             pet_type = PetType[pet_type.upper()]
-            result = find_closest_audio(text, pet_type)
+            result = find_closest_audio(text, pet_type, num_matches=2)
 
-            matched_audio = result.get('matched_audio')
-            encoded_audio = quote(matched_audio)
+            if 'error' in result:
+                return jsonify(result), 400
+
+            # Process the matches and create URLs
+            matches_with_urls = []
+            for match in result['matches']:
+                audio_file = match['audio_file']
+                encoded_audio = quote(audio_file)
+                matches_with_urls.append({
+                    'audio_url': f'https://petspeak.mos.us-south-1.sufybkt.com/{encoded_audio}',
+                    'confidence_score': float(match['confidence_score'])  # Ensure we have a Python float
+                })
+
             return jsonify({
-                'matched_audio_url': f'https://petspeak.mos.us-south-1.sufybkt.com/{encoded_audio}',
+                'matches': matches_with_urls,
+                'status': 'success'
             })
 
         except Exception as e:
-            # Clean up the temporary file in case of error
             return jsonify({
-                'error': f'Transcription error: {str(e)}',
+                'error': f'Processing error: {str(e)}',
                 'status': 'error'
             }), 500
 
@@ -250,6 +270,7 @@ def process_audio():
             'error': str(e),
             'status': 'error'
         }), 500
+
 
 @app.route("/transcribe", methods=['POST'])
 def transcribe_audio():
@@ -269,7 +290,7 @@ def transcribe_audio():
         with open(file_path, "rb") as f:
             audio_data = f.read()
             encoded_audio = base64.b64encode(audio_data).decode("utf-8")
-        
+
         # Hugging Face API endpoint and headers
         api_url = "https://router.huggingface.co/hf-inference/models/openai/whisper-large-v3-turbo"
         hf_token = os.getenv("HUGGING_FACE_TOKEN")
