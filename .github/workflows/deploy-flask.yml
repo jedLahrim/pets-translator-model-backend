@@ -2,7 +2,7 @@ name: Deploy Flask Backend to Contabo
 
 on:
   push:
-    branches: [ master ]
+    branches: [ main ]
 
 jobs:
   deploy:
@@ -46,7 +46,7 @@ jobs:
               cd pet-speak-flask-backend
             else
               cd pet-speak-flask-backend &&
-              git pull https://$GIT_USERNAME:$GIT_PASSWORD@github.com/${GITHUB_REPOSITORY}.git master
+              git pull https://$GIT_USERNAME:$GIT_PASSWORD@github.com/${GITHUB_REPOSITORY}.git main
             fi &&
 
             # Create virtual environment if it doesn't exist
