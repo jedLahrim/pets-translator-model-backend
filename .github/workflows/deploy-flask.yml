@@ -17,7 +17,7 @@ jobs:
 
       - name: Deploy to Contabo
         env:
-          SERVER_IP: ${{ secrets.PET_SPEAK_BACKEND_SERVER_IP }}
+          SERVER_IP: ${{ secrets.SERVER_IP }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
           SERVER_PASSWORD: ${{ secrets.SERVER_PASSWORD }}
           GIT_USERNAME: ${{ secrets.GIT_USERNAME }}
