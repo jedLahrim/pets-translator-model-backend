@@ -17,59 +17,65 @@ jobs:
 
       - name: Deploy to Contabo
         env:
-          SERVER_IP: ${{ secrets.SERVER_IP }}
+          SERVER_IP: ${{ secrets.PET_SPEAK_BACKEND_SERVER_IP }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
           SERVER_PASSWORD: ${{ secrets.SERVER_PASSWORD }}
           GIT_USERNAME: ${{ secrets.GIT_USERNAME }}
           GIT_PASSWORD: ${{ secrets.GIT_PASSWORD }}
         run: |
           sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP "
+            # Set up logging and debugging
+            set -x
+
             # Update package lists
-            apt-get update -y &&
+            apt-get update -y
 
             # Install Python and pip if not installed
-            apt-get install -y python3 python3-pip python3-venv git &&
-          
-            # Try specific version if the first attempt fails
-            if [ ! -f /usr/bin/python3-venv ]; then
-              apt-get install -y python3.12-venv || apt-get install -y python3.10-venv || apt-get install -y python3.8-venv
-            fi &&
+            apt-get install -y python3 python3-pip python3-venv git
 
             # Install system dependencies for audio processing
-            apt-get install -y ffmpeg libsndfile1 &&
+            apt-get install -y ffmpeg libsndfile1
 
             # Navigate to project directory
-            mkdir -p /root &&
-            cd /root &&
+            mkdir -p /root
+            cd /root
 
             # Clone repository if it doesn't exist
             if [ ! -d pet-speak-flask-backend ]; then
-              git clone https://$GIT_USERNAME:$GIT_PASSWORD@github.com/${GITHUB_REPOSITORY}.git pet-speak-flask-backend &&
-              cd pet-speak-flask-backend
+              git clone https://$GIT_USERNAME:$GIT_PASSWORD@github.com/${GITHUB_REPOSITORY}.git pet-speak-flask-backend
             else
-              cd pet-speak-flask-backend &&
+              cd pet-speak-flask-backend
               git pull https://$GIT_USERNAME:$GIT_PASSWORD@github.com/${GITHUB_REPOSITORY}.git main
-            fi &&
+              cd ..
+            fi
 
-            # Detect Python version and install appropriate venv package if needed
-            PYTHON_VERSION=\$(python3 --version | cut -d' ' -f2 | cut -d'.' -f1-2) &&
-            echo \"Using Python version: \$PYTHON_VERSION\" &&
-            apt-get install -y python\${PYTHON_VERSION}-venv || echo \"Could not install specific venv package for Python \$PYTHON_VERSION, continuing anyway\" &&
+            cd pet-speak-flask-backend
 
-            # Create virtual environment if it doesn't exist
-            if [ ! -d venv ]; then
-              python3 -m venv venv || { echo 'Failed to create virtual environment'; exit 1; }
-            fi &&
+            # Check Python and environment
+            python3 --version
+            which python3
+            ls -la
+
+            # Force clean and recreate virtual environment
+            rm -rf venv
+            python3 -m venv venv
+
+            # Check if venv was created successfully
+            if [ ! -f venv/bin/activate ]; then
+              echo 'Virtual environment creation failed'
+              ls -la venv
+              exit 1
+            fi
 
             # Activate virtual environment and install dependencies
-            source venv/bin/activate &&
-            pip install --upgrade pip &&
-            pip install -r requirements.txt &&
-            pip install gunicorn &&
+            . venv/bin/activate
+            pip install --upgrade pip
+            pip install -r requirements.txt
+            pip install gunicorn
 
             # Make upload directory
-            mkdir -p temp_uploads &&
-            chmod 777 temp_uploads &&
+            mkdir -p temp_uploads
+            chmod 777 temp_uploads
 
             # Setup systemd service for Flask app
             echo '[Unit]
@@ -83,17 +89,17 @@ jobs:
             ExecStart=/root/pet-speak-flask-backend/venv/bin/gunicorn --workers 4 --bind 0.0.0.0:5000 main:app
 
             [Install]
-            WantedBy=multi-user.target' > /etc/systemd/system/pet-speak-flask.service &&
+            WantedBy=multi-user.target' > /etc/systemd/system/pet-speak-flask.service
 
             # Reload systemd, enable and restart the service
-            systemctl daemon-reload &&
-            systemctl enable pet-speak-flask &&
-            systemctl restart pet-speak-flask &&
+            systemctl daemon-reload
+            systemctl enable pet-speak-flask
+            systemctl restart pet-speak-flask
 
             # Optional: Set up Nginx as reverse proxy if needed
             if ! command -v nginx &> /dev/null; then
               apt-get install -y nginx
-            fi &&
+            fi
 
             echo 'server {
                 listen 80;
@@ -107,9 +113,9 @@ jobs:
                     proxy_set_header X-Forwarded-Proto \$scheme;
                     client_max_body_size 30M;
                 }
-            }' > /etc/nginx/sites-available/pet-speak-flask &&
+            }' > /etc/nginx/sites-available/pet-speak-flask
 
-            ln -sf /etc/nginx/sites-available/pet-speak-flask /etc/nginx/sites-enabled/ &&
-            rm -f /etc/nginx/sites-enabled/default &&
+            ln -sf /etc/nginx/sites-available/pet-speak-flask /etc/nginx/sites-enabled/
+            rm -f /etc/nginx/sites-enabled/default
             systemctl restart nginx
           "
