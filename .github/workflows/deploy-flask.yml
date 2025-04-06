@@ -24,16 +24,17 @@ jobs:
           GIT_PASSWORD: ${{ secrets.GIT_PASSWORD }}
         run: |
           sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP "
-            # Set up logging
+            # Enable error logging
             set -x
 
-            # Update package lists
+            # Update system packages
             apt-get update -y
+            apt-get upgrade -y
 
-            # Install Python and dependencies
-            apt-get install -y python3 python3-pip python3-venv git ffmpeg libsndfile1
+            # Install required dependencies
+            apt-get install -y python3 python3-pip python3-venv git ffmpeg libsndfile1 nginx
 
-            # Navigate to project directory
+            # Navigate to root directory
             mkdir -p /root
             cd /root
 
@@ -48,33 +49,37 @@ jobs:
 
             cd pet-speak-flask-backend
 
-            # Create and activate virtual environment
+            # Create fresh virtual environment
             rm -rf venv
             python3 -m venv venv
             source venv/bin/activate
 
-            # Install dependencies
+            # Install Python dependencies
             pip install --upgrade pip
             pip install -r requirements.txt
             pip install gunicorn
 
-            # Create upload directory
+            # Create uploads directory
             mkdir -p temp_uploads
             chmod 777 temp_uploads
 
-            # Start Flask on port 5000 via Gunicorn
+            # Install PM2 if not exists
+            if ! command -v pm2 &> /dev/null; then
+              npm install -g pm2
+            fi
+
+            # Restart Flask app via PM2
             pm2 delete pet-speak-flask || true
-            pm2 start venv/bin/gunicorn --name pet-speak-flask -- --bind 0.0.0.0:5000 main:app
+            pm2 start venv/bin/gunicorn --name pet-speak-flask -- --bind 0.0.0.0:5000 --workers 4 main:app
             pm2 save
 
-            # Update Nginx config to include Flask routes
+            # Configure Nginx
             echo 'server {
                 listen 80;
                 server_name _;
 
-                # Flask backend routes
-                location /api/flask {
-                    proxy_pass http://127.0.0.1:5000;
+                location /api/flask/ {
+                    proxy_pass http://127.0.0.1:5000/;
                     proxy_set_header Host \$host;
                     proxy_set_header X-Real-IP \$remote_addr;
                     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -82,16 +87,6 @@ jobs:
                     client_max_body_size 30M;
                 }
 
-                # NestJS backend routes
-                location /api/nest {
-                    proxy_pass http://127.0.0.1:3000;
-                    proxy_set_header Host \$host;
-                    proxy_set_header X-Real-IP \$remote_addr;
-                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                    proxy_set_header X-Forwarded-Proto \$scheme;
-                }
-
-                # Default to NestJS
                 location / {
                     proxy_pass http://127.0.0.1:3000;
                     proxy_set_header Host \$host;
@@ -103,5 +98,12 @@ jobs:
 
             # Enable Nginx config
             ln -sf /etc/nginx/sites-available/pet-speak /etc/nginx/sites-enabled/
+            rm -f /etc/nginx/sites-enabled/default
             systemctl restart nginx
+
+            # Verify services
+            echo 'Deployment complete. Checking services:'
+            pm2 list
+            systemctl status nginx
+            curl -v http://localhost/api/flask/
           "
