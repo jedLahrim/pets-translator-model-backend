@@ -1,4 +1,4 @@
-name: Deploy Flask to Contabo
+name: Deploy Flask Backend to Contabo
 
 on:
   push:
@@ -24,21 +24,23 @@ jobs:
           GIT_PASSWORD: ${{ secrets.GIT_PASSWORD }}
         run: |
           sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP "
-            # Enable error logging
+            # Set up logging and debugging
             set -x
 
-            # Update system packages
+            # Update package lists
             apt-get update -y
-            apt-get upgrade -y
 
-            # Install required dependencies
-            apt-get install -y python3 python3-pip python3-venv git ffmpeg libsndfile1 nginx
+            # Install Python and pip if not installed
+            apt-get install -y python3 python3-pip python3-venv git
 
-            # Navigate to root directory
+            # Install system dependencies for audio processing
+            apt-get install -y ffmpeg libsndfile1
+
+            # Navigate to project directory
             mkdir -p /root
             cd /root
 
-            # Clone or update repository
+            # Clone repository if it doesn't exist
             if [ ! -d pet-speak-flask-backend ]; then
               git clone https://$GIT_USERNAME:$GIT_PASSWORD@github.com/${GITHUB_REPOSITORY}.git pet-speak-flask-backend
             else
@@ -49,61 +51,71 @@ jobs:
 
             cd pet-speak-flask-backend
 
-            # Create fresh virtual environment
+            # Check Python and environment
+            python3 --version
+            which python3
+            ls -la
+
+            # Force clean and recreate virtual environment
             rm -rf venv
             python3 -m venv venv
-            source venv/bin/activate
 
-            # Install Python dependencies
+            # Check if venv was created successfully
+            if [ ! -f venv/bin/activate ]; then
+              echo 'Virtual environment creation failed'
+              ls -la venv
+              exit 1
+            fi
+
+            # Activate virtual environment and install dependencies
+            . venv/bin/activate
             pip install --upgrade pip
             pip install -r requirements.txt
             pip install gunicorn
 
-            # Create uploads directory
+            # Make upload directory
             mkdir -p temp_uploads
             chmod 777 temp_uploads
 
-            # Install PM2 if not exists
-            if ! command -v pm2 &> /dev/null; then
-              npm install -g pm2
+            # Setup systemd service for Flask app
+            echo '[Unit]
+            Description=Pet Speak Flask Backend
+            After=network.target
+
+            [Service]
+            User=root
+            WorkingDirectory=/root/pet-speak-flask-backend
+            Environment=\"PATH=/root/pet-speak-flask-backend/venv/bin\"
+            ExecStart=/root/pet-speak-flask-backend/venv/bin/gunicorn --workers 4 --bind 0.0.0.0:5000 main:app
+
+            [Install]
+            WantedBy=multi-user.target' > /etc/systemd/system/pet-speak-flask.service
+
+            # Reload systemd, enable and restart the service
+            systemctl daemon-reload
+            systemctl enable pet-speak-flask
+            systemctl restart pet-speak-flask
+
+            # Optional: Set up Nginx as reverse proxy if needed
+            if ! command -v nginx &> /dev/null; then
+              apt-get install -y nginx
             fi
 
-            # Restart Flask app via PM2
-            pm2 delete pet-speak-flask || true
-            pm2 start venv/bin/gunicorn --name pet-speak-flask -- --bind 0.0.0.0:5000 --workers 4 main:app
-            pm2 save
-
-            # Configure Nginx
             echo 'server {
                 listen 80;
                 server_name _;
 
-                location /api/flask/ {
-                    proxy_pass http://127.0.0.1:5000/;
+                location / {
+                    proxy_pass http://127.0.0.1:5000;
                     proxy_set_header Host \$host;
                     proxy_set_header X-Real-IP \$remote_addr;
                     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
                     proxy_set_header X-Forwarded-Proto \$scheme;
                     client_max_body_size 30M;
                 }
+            }' > /etc/nginx/sites-available/pet-speak-flask
 
-                location / {
-                    proxy_pass http://127.0.0.1:3000;
-                    proxy_set_header Host \$host;
-                    proxy_set_header X-Real-IP \$remote_addr;
-                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                    proxy_set_header X-Forwarded-Proto \$scheme;
-                }
-            }' > /etc/nginx/sites-available/pet-speak
-
-            # Enable Nginx config
-            ln -sf /etc/nginx/sites-available/pet-speak /etc/nginx/sites-enabled/
+            ln -sf /etc/nginx/sites-available/pet-speak-flask /etc/nginx/sites-enabled/
             rm -f /etc/nginx/sites-enabled/default
             systemctl restart nginx
-
-            # Verify services
-            echo 'Deployment complete. Checking services:'
-            pm2 list
-            systemctl status nginx
-            curl -v http://localhost/api/flask/
           "
