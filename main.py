@@ -20,17 +20,12 @@ from label.labels import DOG_LABEL_TYPE, CAT_LABEL_TYPE
 from pet_type import PetType
 import requests
 from dotenv import load_dotenv
-from werkzeug.middleware.dispatcher import DispatcherMiddleware
-from werkzeug.serving import run_simple
+
 # Load environment variables from .env file
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
-
-@app.route('/test')
-def test():
-    return "Flask is working!"
 
 
 def load_models(pet_type: PetType):
@@ -331,9 +326,5 @@ def transcribe_audio():
         return jsonify({"error": f"An error occurred: {str(e)}"}), 500
 
 
-application = DispatcherMiddleware(app, {
-    '/api/flask': app
-})
-
 if __name__ == '__main__':
-    run_simple('0.0.0.0', 5000, application)
+    app.run(debug=True, host="127.0.0.1", port=5000)
