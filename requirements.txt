@@ -1,7 +1,9 @@
 gunicorn
 numpy
 scipy
-sentence_transformers
+sentence_transformers==2.6.0
+transformers==4.48.0
+huggingface_hub>=0.19.4
 librosa
 onnx
 onnxruntime
