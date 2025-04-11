@@ -15,10 +15,8 @@ from scipy.spatial.distance import cosine
 from sentence_transformers import SentenceTransformer
 from translate import Translator
 from werkzeug.utils import secure_filename
-import base64
 from label.labels import DOG_LABEL_TYPE, CAT_LABEL_TYPE
 from pet_type import PetType
-import requests
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -271,59 +269,6 @@ def process_audio():
             'status': 'error'
         }), 500
 
-
-@app.route("/transcribe", methods=['POST'])
-def transcribe_audio():
-    try:
-        # Check if the audio file is present in the request
-        if 'audio_file' not in request.files:
-            return jsonify({"error": "no file uploaded"}), 400
-
-        audio_file = request.files['audio_file']
-
-        # Save the uploaded file temporarily
-        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(audio_file.filename)[1]) as temp_file:
-            audio_file.save(temp_file.name)
-            file_path = temp_file.name
-
-        # Read the audio file and encode it in base64
-        with open(file_path, "rb") as f:
-            audio_data = f.read()
-            encoded_audio = base64.b64encode(audio_data).decode("utf-8")
-
-        # Hugging Face API endpoint and headers
-        api_url = "https://router.huggingface.co/hf-inference/models/openai/whisper-large-v3-turbo"
-        hf_token = os.getenv("HUGGING_FACE_TOKEN")
-        headers = {
-            "Authorization": f"Bearer {hf_token}",  # Replace with your Hugging Face token
-            "Content-Type": "audio/webm;codecs=opus"
-        }
-
-        # Prepare the payload
-        payload = {
-            "inputs": encoded_audio,
-            # "parameters": {
-            #     "task": "transcribe"  # Optional: Specify the task (transcribe or translate)
-            # }
-        }
-
-        # Send the request to the Hugging Face API
-        response = requests.post(api_url, headers=headers, json=payload)
-
-        # Check if the request was successful
-        if response.status_code != 200:
-            return jsonify({"error": f"Hugging Face API error: {response.text}"}), 500
-
-        # Extract the transcribed text from the response
-        transcribed_text = response.json().get("text", "")
-
-        # Clean up the temporary file
-        os.unlink(file_path)
-
-        return jsonify({"transcribed_text": transcribed_text})
-
-    except Exception as e:
-        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
 
 
 if __name__ == '__main__':
